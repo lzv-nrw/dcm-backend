@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.2] - 2024-11-21
+
+### Changed
+
+- updated package metadata, Dockerfiles, and README
+
 ## [1.0.1] - 2024-10-22
 
 ### Fixed

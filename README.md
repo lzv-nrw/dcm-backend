@@ -1,172 +1,83 @@
-# dcm-backend
+# Digital Curation Manager - Backend
 
-The 'DCM Backend'-service provides backend functionalities to the DCM.
+The 'DCM Backend'-API provides functionality to
+* trigger an ingest in the archive-system,
+* collect the current ingest-status,
+* manage job configurations, and
+* control job execution.
 
-Currently only the `ArchiveController` component is available that offers the following functionalities ([see below](#usage-of-the-archive-controller)):
-* triggering a new deposit activity into Rosetta (`POST` request), and
-* retrieving the status of an existing deposit activity in Rosetta (`GET` request).
+This repository contains the corresponding Flask app definition.
+For the associated OpenAPI-document, please refer to the sibling package [`dcm-backend-api`](https://github.com/lzv-nrw/dcm-backend-api).
 
-## Helper script to generate the file with the Authorization HTTP header
+The contents of this repository are part of the [`Digital Curation Manager`](https://github.com/lzv-nrw/digital-curation-manager).
 
-The file `convert_credentials.sh` contains a helper script to generate
-the Authorization HTTP header for the requests. The path to the output file
-can optionally be given as an input parameter, with default being
-`~/.rosetta/rosetta_auth`.
-The user is prompted to provide the institution code, the username,
-and the password for the used Rosetta instance.
+## Ex Libris Rosetta authorization HTTP header
 
-If the file `rosetta_auth` already exists, the user is prompted whether
-to allow overwriting it.
+Using the Rosetta REST-API requires authentication via the `Basic` HTTP authentication scheme (see [docs](https://developers.exlibrisgroup.com/rosetta/apis/rest-apis/)).
+The file `convert_credentials.sh` contains a helper script to generate that headers contents.
+An output destination can optionally be given as first argument (with default being `~/.rosetta/rosetta_auth`).
+The user is then prompted to provide the institution code, the username, and the password for the specific Rosetta instance.
 
-For testing the script result, the environment variable `ARCHIVE_API_BASE_URL`
-has to be set and the following curl command can be executed:
-
+In order to test the generated header, use, for example, the following curl-command:
 ```
-curl -X GET "${ARCHIVE_API_BASE_URL}/rest/v0/deposits" -H @<path-to-header-file> -H 'accept: application/json'
+curl -X GET "<API-base-url>/rest/v0/deposits" -H @<path-to-header-file> -H 'accept: application/json'
 ```
 
-## Usage of the Archive Controller
-Example for a `GET` request, which retrieves the status of a deposit activity:
-```python
-from dcm_backend.config import AppConfig
-from dcm_backend.components import ArchiveController
-archive_controller = ArchiveController(
-    auth=AppConfig.ROSETTA_AUTH_FILE,
-    url=AppConfig.ARCHIVE_API_BASE_URL
-)
-archive_controller.get_deposit("0000")
-```
+## Local install
+Make sure to include the extra-index-url `https://zivgitlab.uni-muenster.de/api/v4/projects/9020/packages/pypi/simple` in your [pip-configuration](https://pip.pypa.io/en/stable/cli/pip_install/#finding-packages) to enable an automated install of all dependencies.
+Using a virtual environment is recommended.
 
-Example for a `POST` request, which triggers a new deposit activity:
-```python
-from dcm_backend.config import AppConfig
-from dcm_backend.components import ArchiveController
-archive_controller = ArchiveController(
-    auth=AppConfig.ROSETTA_AUTH_FILE,
-    url=AppConfig.ARCHIVE_API_BASE_URL
-)
-archive_controller.post_deposit(
-    subdirectory="dir",
-    producer="1234",
-    material_flow="1234"
-)
-```
-
-## Usage of the Scheduler
-Example usage for printing the time every other second:
-
-```python
-from time import sleep
-
-from dcm_common.util import now
-
-from dcm_backend.models import JobConfig, Repeat, Schedule, TimeUnit
-from dcm_backend.components import Scheduler
-
-
-def f(config):
-    print(now())
-
-scheduler = Scheduler(job_cmd=f)
-
-job_config_id = "0000"
-job_config = JobConfig(
-    id_=job_config_id,
-    last_modified=now(),
-    job={},
-    schedule=Schedule(
-        active=True,
-        repeat=Repeat(unit=TimeUnit.SECOND, interval=2)
-    )
-)
-scheduler.schedule(job_config)
-
-for i in range(10):
-    scheduler.run_pending()
-    sleep(1)
-
-scheduler.cancel(job_config_id)
-for i in range(5):
-    scheduler.run_pending()
-    sleep(1)
-```
-
-## Run locally
-Running in a `venv` is recommended.
-
-To test the app locally,
-1. install with
+1. Install with
    ```
    pip install .
    ```
-1. Configure service environment to your needs ([see here](#environmentconfiguration)).
-1. run as
+1. Configure service environment to fit your needs ([see here](#environmentconfiguration)).
+1. Run app as
    ```
    flask run --port=8080
    ```
-1. use either command line tools like `curl`,
+1. To manually use the API, either run command line tools like `curl` as, e.g.,
    ```
    curl -X 'POST' \
      'http://localhost:8080/ingest' \
      -H 'accept: application/json' \
      -H 'Content-Type: application/json' \
      -d '{
-    "ingest": {
-        "archive_identifier": "rosetta",
-        "rosetta": {
-         "subdir": "test_dir"
-        }
-    }
+     "ingest": {
+       "archive_identifier": "rosetta",
+       "rosetta": {
+         "subdir": "2468edf8-6706-4ff0-bd03-04512d082c28",
+         "producer": "12345678",
+         "material_flow": "12345678"
+       }
+     }
    }'
    ```
-   or a gui like [swagger-ui](https://github.com/lzv-nrw/dcm-backend-api/-/blob/dev/dcm_backend_api/openapi.yaml?ref_type=heads) (see sibling package [`dcm-backend-api`](https://github.com/lzv-nrw/dcm-backend-api)) to submit jobs
+   or run a gui-application, like Swagger UI, based on the OpenAPI-document provided in the sibling package [`dcm-backend-api`](https://github.com/lzv-nrw/dcm-backend-api).
 
-
-## Run with Docker
-### Container setup
-Use the `compose.yml` to start the `DCM Backend`-container as a service:
+## Run with docker compose
+Simply run
 ```
 docker compose up
 ```
-(to rebuild run `docker compose build`).
+By default, the app listens on port 8080.
+To rebuild an already existing image, run `docker compose build`.
 
-A Swagger UI is hosted at
+Additionally, a Swagger UI is hosted at
 ```
 http://localhost/docs
 ```
-while (by-default) the app listens to port `8080`.
 
-Afterwards, stop the process for example with `Ctrl`+`C` and enter `docker compose down`.
-
-If the file `rosetta_auth` is not stored in the default path (`~/.rosetta/rosetta_auth`),
-the path of the secret `rosetta-auth` of the `compose.yml` should be corrected
-before building the container.
-
-The build process requires authentication with `zivgitlab.uni-muenster.de` in order to gain access to the required python dependencies.
-The Dockerfiles are setup to use the information from `~/.netrc` for this authentication (a gitlab api-token is required).
-
-## Configuration for Rosetta test-instance
-The Archive Controller should be configured to work with the Rosetta test system (hosted by the hbz).
-The Rosetta instance (API) can (currently) be accessed by using the regular credentials also used for the web-interface.
-Depending on whether the 'DCM Backend'-service is run in docker or locally, the configuration has to be applied to either the `compose.yml` or in the environment where `flask run` is executed.
-
-### Rosetta API
-In order to make requests to the Rosetta API, the credentials have to be given in the correct format, i.e., as an HTTP-Basic Authentication header. [See the helper script to generate the file with the Authorization HTTP header](#helper-script-to-generate-the-file-with-the-authorization-http-header) 
-
-### Environment
-Set the following environment variables:
-  * `ARCHIVE_API_BASE_URL`
-  * `ROSETTA_PRODUCER`
-  * `ROSETTA_MATERIAL_FLOW`
-
-This repository provides the environment-file `rosettaapi.env` that can be used to load the correct settings.
-Simply add `env_file: rosettaapi.env` to the service definition in the `compose.yml` (note that the `environment`-block takes precedence over `env_file`) or run `export $(xargs < rosettaapi.env)` (locally).
+Afterwards, stop the process and enter `docker compose down`.
 
 ## Tests
-Install additional dependencies from `dev-requirements.txt`.
+Install additional dev-dependencies with
+```
+pip install -r dev-requirements.txt
+```
 Run unit-tests with
 ```
-pytest -v -s --cov dcm_backend
+pytest -v -s
 ```
 
 ## Environment/Configuration
@@ -199,7 +110,7 @@ Additionally this service provides environment options for
 * `BaseConfig` and
 * `OrchestratedAppConfig`
 
-as listed [here](https://github.com/lzv-nrw/dcm-common/-/tree/dev?ref_type=heads#app-configuration).
+as listed [here](https://github.com/lzv-nrw/dcm-common#app-configuration).
 
 # Contributors
 * Sven Haubold
@@ -209,3 +120,4 @@ as listed [here](https://github.com/lzv-nrw/dcm-common/-/tree/dev?ref_type=heads
 * Michael Rahier
 * Steffen Richters-Finger
 * Malte Windrath
+* Roman Kudinov

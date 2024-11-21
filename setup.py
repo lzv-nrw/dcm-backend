@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    version="1.0.1",
+    version="1.0.2",
     name="dcm-backend",
     description="flask app for dcm-backend-containers",
     author="LZV.nrw",
