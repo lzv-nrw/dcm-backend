@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0] - 2025-02-17
+
+### Changed
+
+- **Breaking:** changed url paths for the job configuration endpoints in API v1
+
+### Added
+
+- added new user-API endpoints from API v1
+- added new configuration-API endpoints from API v1
+
 ## [1.0.2] - 2024-11-21
 
 ### Changed

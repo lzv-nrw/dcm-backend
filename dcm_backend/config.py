@@ -21,7 +21,6 @@ class AppConfig(OrchestratedAppConfig):
     # app extension
     FS_MOUNT_POINT = Path.cwd()
 
-
     # ------ INGEST (ARCHIVE_CONTROLLER) ------
     ROSETTA_AUTH_FILE = Path(
         os.environ["ROSETTA_AUTH_FILE"] if "ROSETTA_AUTH_FILE" in os.environ
@@ -40,12 +39,12 @@ class AppConfig(OrchestratedAppConfig):
     )
 
     # ------ DATABASE ------
-    CONFIGURATION_DATABASE_ADAPTER = (
-        os.environ.get("CONFIGURATION_DATABASE_ADAPTER")
+    JOB_CONFIGURATION_DATABASE_ADAPTER = (
+        os.environ.get("JOB_CONFIGURATION_DATABASE_ADAPTER")
     )
-    CONFIGURATION_DATABASE_SETTINGS = (
-        json.loads(os.environ["CONFIGURATION_DATABASE_SETTINGS"])
-        if "CONFIGURATION_DATABASE_SETTINGS" in os.environ else None
+    JOB_CONFIGURATION_DATABASE_SETTINGS = (
+        json.loads(os.environ["JOB_CONFIGURATION_DATABASE_SETTINGS"])
+        if "JOB_CONFIGURATION_DATABASE_SETTINGS" in os.environ else None
     )
     REPORT_DATABASE_ADAPTER = (
         os.environ.get("REPORT_DATABASE_ADAPTER")
@@ -53,6 +52,23 @@ class AppConfig(OrchestratedAppConfig):
     REPORT_DATABASE_SETTINGS = (
         json.loads(os.environ["REPORT_DATABASE_SETTINGS"])
         if "REPORT_DATABASE_SETTINGS" in os.environ else None
+    )
+    USER_CONFIGURATION_DATABASE_ADAPTER = (
+        os.environ.get("USER_CONFIGURATION_DATABASE_ADAPTER")
+    )
+    USER_CONFIGURATION_DATABASE_SETTINGS = (
+        json.loads(os.environ["USER_CONFIGURATION_DATABASE_SETTINGS"])
+        if "USER_CONFIGURATION_DATABASE_SETTINGS" in os.environ else None
+    )
+
+    # ------ USERS ------
+    CREATE_DEMO_USERS = (int(os.environ.get("CREATE_DEMO_USERS") or 0)) == 1
+    REQUIRE_USER_ACTIVATION = (
+        (int(os.environ.get("REQUIRE_USER_ACTIVATION") or 1)) == 1
+    )
+    USER_ACTIVATION_URL_FMT = os.environ.get(
+        "USER_ACTIVATION_URL_FMT",
+        "ERROR: activation url-format not configured (password={password})",
     )
 
     # ------ SCHEDULING ------
@@ -83,20 +99,18 @@ class AppConfig(OrchestratedAppConfig):
         Loader=yaml.SafeLoader
     )
 
-    def set_identity(self) -> None:
-        super().set_identity()
-
-        # configuration-db
-        self._config_db_settings = {
-            "type": self.CONFIGURATION_DATABASE_ADAPTER or "native",
+    def __init__(self) -> None:
+        # job configuration-db
+        self._job_config_db_settings = {
+            "type": self.JOB_CONFIGURATION_DATABASE_ADAPTER or "native",
             "settings": (
-                self.CONFIGURATION_DATABASE_SETTINGS
+                self.JOB_CONFIGURATION_DATABASE_SETTINGS
                 or {"backend": "memory"}
             )
         }
-        self.config_db = self._load_adapter(
-            "config_db", self._config_db_settings["type"],
-            self._config_db_settings["settings"]
+        self.job_config_db = self._load_adapter(
+            "job_config_db", self._job_config_db_settings["type"],
+            self._job_config_db_settings["settings"]
         )
 
         # report-db
@@ -111,6 +125,24 @@ class AppConfig(OrchestratedAppConfig):
             "report_db", self._report_db_settings["type"],
             self._report_db_settings["settings"]
         )
+
+        # user configuration-db
+        self._user_config_db_settings = {
+            "type": self.USER_CONFIGURATION_DATABASE_ADAPTER or "native",
+            "settings": (
+                self.USER_CONFIGURATION_DATABASE_SETTINGS
+                or {"backend": "memory"}
+            )
+        }
+        self.user_config_db = self._load_adapter(
+            "user_config_db", self._user_config_db_settings["type"],
+            self._user_config_db_settings["settings"]
+        )
+
+        super().__init__()
+
+    def set_identity(self) -> None:
+        super().set_identity()
 
         self.CONTAINER_SELF_DESCRIPTION["description"] = (
             "This API provides backend-related endpoints."
@@ -140,8 +172,9 @@ class AppConfig(OrchestratedAppConfig):
         if self.ARCHIVE_API_PROXY is not None:
             settings["ingest"]["proxy"] = self.ARCHIVE_API_PROXY
         settings["database"] = {
-            "configuration": self._config_db_settings,
+            "jobConfiguration": self._job_config_db_settings,
             "report": self._report_db_settings,
+            "userConfiguration": self._user_config_db_settings,
         }
         settings["scheduling"] = {
             "controls_api": self.SCHEDULING_CONTROLS_API,
@@ -151,6 +184,10 @@ class AppConfig(OrchestratedAppConfig):
         settings["job"] = {
             "timeout": {"duration": self.JOB_PROCESSOR_TIMEOUT},
             "polling_interval": self.JOB_PROCESSOR_POLL_INTERVAL,
+        }
+        settings["user"] = {
+            "user_activation": self.REQUIRE_USER_ACTIVATION,
+            "activation_url_fmt": self.USER_ACTIVATION_URL_FMT,
         }
 
         self.CONTAINER_SELF_DESCRIPTION["configuration"]["services"] = {

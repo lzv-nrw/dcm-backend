@@ -4,6 +4,7 @@ Test module for the package `dcm-backend-sdk`.
 
 from time import sleep
 from uuid import uuid4
+from hashlib import md5
 
 from flask import jsonify
 import pytest
@@ -26,6 +27,7 @@ def _sdk_testing_config(testing_config, sdk_job_tests_folder):
     testing_config.REPORT_DATABASE_SETTINGS = {
         "backend": "disk", "dir": str(sdk_job_tests_folder)
     }
+    testing_config.CREATE_DEMO_USERS = True
     return testing_config
 
 
@@ -78,6 +80,17 @@ def _job_sdk():
     )
 
 
+@pytest.fixture(name="user_sdk", scope="module")
+def _user_sdk():
+    return dcm_backend_sdk.UserApi(
+        dcm_backend_sdk.ApiClient(
+            dcm_backend_sdk.Configuration(
+                host="http://localhost:8080"
+            )
+        )
+    )
+
+
 def test_default_ping(
     default_sdk: dcm_backend_sdk.DefaultApi, app, run_service
 ):
@@ -118,7 +131,6 @@ def test_default_identify(
 
 
 def test_ingest_report(
-    default_sdk: dcm_backend_sdk.DefaultApi,
     ingest_sdk: dcm_backend_sdk.IngestApi,
     app, run_service,
     minimal_request_body,
@@ -163,7 +175,7 @@ def test_ingest_report_404(
 
 
 def test_configure(config_sdk: dcm_backend_sdk.ConfigApi, app, run_service):
-    """Test `/configure`-endpoints."""
+    """Test `/job/configure`-endpoints."""
 
     run_service(app)
 
@@ -180,18 +192,18 @@ def test_configure(config_sdk: dcm_backend_sdk.ConfigApi, app, run_service):
             "repeat": {"unit": "second", "interval": 1}
         }
     }
-    config_info = config_sdk.set_config(minimal_config)
-    config = config_sdk.get_config(config_info.id).to_dict()
+    config_info = config_sdk.set_job_config(minimal_config)
+    config = config_sdk.get_job_config(config_info.id).to_dict()
     assert config == (
         minimal_config
         | config_info.to_dict()
         | {"last_modified": config["last_modified"]}
     )
 
-    assert config_sdk.list_configs() == [config_info.id]
+    assert config_sdk.list_job_configs() == [config_info.id]
 
-    config_sdk.delete_config(config_info.id)
-    assert config_sdk.list_configs() == []
+    config_sdk.delete_job_config(config_info.id)
+    assert config_sdk.list_job_configs() == []
 
 
 def test_job(
@@ -237,7 +249,7 @@ def test_job(
     )
 
     # post job
-    config_info = config_sdk.set_config(minimal_config)
+    config_info = config_sdk.set_job_config(minimal_config)
     assert config_info.id == minimal_config["id"]
     job_token = job_sdk.run({"id": minimal_config["id"]})
     assert job_token.value == token["value"]
@@ -250,6 +262,90 @@ def test_job(
     assert jobs[0].token.to_dict() == token
 
     # get job
-    info = job_sdk.get_info(token["value"])
+    info = job_sdk.get_job_info(token["value"])
     assert info.token.to_dict() == token
     assert info.report.token.to_dict() == token
+
+
+def test_configure_user(
+    config_sdk: dcm_backend_sdk.ConfigApi, app, run_service
+):
+    """Test `/user/configure`-endpoints."""
+
+    run_service(app)
+
+    minimal_config = {
+        "userId": "user0",
+        "externalId": "-",
+        "roles": []
+    }
+    config_sdk.create_user(minimal_config)
+    config = config_sdk.get_user_config("user0").to_dict()
+    assert config == minimal_config
+
+    # update user
+    config_sdk.update_user(minimal_config | {"externalId": "user1"})
+    assert config_sdk.get_user_config("user0").to_dict()["externalId"] == "user1"
+
+    # list users
+    users = config_sdk.list_users()
+    assert len(users) == 3
+    assert minimal_config["userId"] in users
+
+    # delete user
+    config_sdk.delete_user_config("user0")
+    with pytest.raises(dcm_backend_sdk.ApiException):
+        config_sdk.get_user_config("user0")
+
+
+def test_user_login(
+    user_sdk: dcm_backend_sdk.UserApi,
+    app,
+    run_service,
+):
+    """Test `POST-/user`-endpoint."""
+
+    run_service(app)
+
+    # successful login
+    assert (
+        user_sdk.login(
+            {
+                "userId": "Einstein",
+                "password": md5(b"relativity").hexdigest(),
+            }
+        )
+        == "OK"
+    )
+    # failed login
+    try:
+        user_sdk.login(
+            {"userId": "Einstein", "password": "bad-pw"}
+        )
+    except dcm_backend_sdk.exceptions.ApiException as exc_info:
+        assert exc_info.status == 401
+
+
+def test_user_change_password(
+    user_sdk: dcm_backend_sdk.UserApi,
+    app,
+    run_service,
+):
+    """Test `POST-/user/password`-endpoint."""
+
+    run_service(app)
+
+    # change password
+    new_password = md5(b"password").hexdigest()
+    assert (
+        user_sdk.change_user_password(
+            {
+                "userId": "Einstein",
+                "password": md5(b"relativity").hexdigest(),
+                "newPassword": new_password,
+            }
+        )
+        == "OK"
+    )
+    # login with new password
+    user_sdk.login({"userId": "Einstein", "password": new_password})

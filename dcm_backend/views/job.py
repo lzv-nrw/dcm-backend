@@ -24,7 +24,7 @@ class JobView(View):
 
     Keyword arguments:
     config -- `AppConfig`-object
-    config_db -- adapter for configuration-database
+    config_db -- adapter for job configuration-database
     report_db -- adapter for job report-database
     scheduler -- `Scheduler`-object
     adapter -- `JobProcessorAdapter`-object

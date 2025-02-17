@@ -5,7 +5,12 @@ Test module for the `dcm_backend/handlers.py`.
 import pytest
 from data_plumber_http.settings import Responses
 
-from dcm_backend.models import IngestConfig, JobConfig
+from dcm_backend.models import (
+    IngestConfig,
+    JobConfig,
+    UserConfig,
+    UserCredentials,
+)
 from dcm_backend import handlers
 
 
@@ -306,12 +311,12 @@ def test_config_id_handler_not_required(json, status):
     ]),
     ids=[f"stage {i+1}" for i in range(len(pytest_args))]
 )
-def test_config_post_handler(
+def test_job_config_post_handler(
     json, status
 ):
-    "Test `config_post_handler`."
+    "Test `job_config_post_handler`."
 
-    output = handlers.config_post_handler.run(json=json)
+    output = handlers.job_config_post_handler.run(json=json)
 
     assert output.last_status == status
     if status != Responses.GOOD.status:
@@ -352,3 +357,180 @@ def test_job_status_filter_handler(json, status):
                     for x in output.data.value["status"]
                 )
             )
+
+
+@pytest.mark.parametrize(
+    ("json", "status"),
+    (pytest_args := [
+        (
+            {"no-id": None},
+            400
+        ),
+        (
+            {"userId": None},
+            422
+        ),
+        (
+            {"userId": None, "unkown": None},
+            400
+        ),
+        (
+            {"userId": "a"},
+            Responses().GOOD.status
+        ),
+        (
+            {"userId": "a", "externalId": True},
+            422
+        ),
+        (
+            {"userId": "a", "externalId": "b"},
+            Responses().GOOD.status
+        ),
+        (
+            {"userId": "a", "firstname": 0},
+            422
+        ),
+        (
+            {"userId": "a", "firstname": "b"},
+            Responses().GOOD.status
+        ),
+        (
+            {"userId": "a", "lastname": 0},
+            422
+        ),
+        (
+            {"userId": "a", "lastname": "b"},
+            Responses().GOOD.status
+        ),
+        (
+            {"userId": "a", "email": 0},
+            422
+        ),
+        (
+            {"userId": "a", "email": "b"},
+            422
+        ),
+        (
+            {"userId": "a", "email": "pete@lzv.nrw"},
+            Responses().GOOD.status
+        ),
+        (
+            {"userId": "a", "roles": None},
+            422
+        ),
+        (
+            {"userId": "a", "roles": []},
+            Responses().GOOD.status
+        ),
+        (
+            {"userId": "a", "roles": ["1", "2"]},
+            Responses().GOOD.status
+        ),
+    ]),
+    ids=[f"stage {i+1}" for i in range(len(pytest_args))]
+)
+def test_user_config_post_handler(
+    json, status
+):
+    "Test `user_config_post_handler`."
+
+    output = handlers.user_config_post_handler.run(json=json)
+
+    assert output.last_status == status
+    if status != Responses.GOOD.status:
+        print(output.last_message)
+    else:
+        assert isinstance(output.data.value["config"], UserConfig)
+
+
+@pytest.mark.parametrize(
+    ("json", "status"),
+    (pytest_args := [
+        (
+            {"no-userId": None},
+            400
+        ),
+        (
+            {"password": "p"},
+            400
+        ),
+        (
+            {"userId": "u"},
+            400
+        ),
+        (
+            {"userId": None, "password": "p"},
+            422
+        ),
+        (
+            {"userId": "u", "password": None},
+            422
+        ),
+        (
+            {"userId": "u", "password": "p"},
+            Responses().GOOD.status
+        ),
+    ]),
+    ids=[f"stage {i+1}" for i in range(len(pytest_args))]
+)
+def test_user_login_handler(json, status):
+    "Test `user_login_handler`."
+
+    output = handlers.user_login_handler.run(json=json)
+
+    assert output.last_status == status
+    if status != Responses.GOOD.status:
+        print(output.last_message)
+    else:
+        assert isinstance(output.data.value["credentials"], UserCredentials)
+
+
+@pytest.mark.parametrize(
+    ("json", "status"),
+    (pytest_args := [
+        (
+            {"no-userId": None},
+            400
+        ),
+        (
+            {"password": "p", "newPassword": "p"},
+            400
+        ),
+        (
+            {"userId": "u", "newPassword": "p"},
+            400
+        ),
+        (
+            {"userId": "u", "password": "p"},
+            400
+        ),
+        (
+            {"userId": None, "password": "p", "newPassword": "p"},
+            422
+        ),
+        (
+            {"userId": "u", "password": None, "newPassword": "p"},
+            422
+        ),
+        (
+            {"userId": "u", "password": "p", "newPassword": None},
+            422
+        ),
+        (
+            {"userId": "u", "password": "p", "newPassword": "p"},
+            Responses().GOOD.status
+        ),
+    ]),
+    ids=[f"stage {i+1}" for i in range(len(pytest_args))]
+)
+def test_user_change_password_handler(json, status):
+    "Test `user_change_password_handler`."
+
+    output = handlers.user_change_password_handler.run(json=json)
+
+    assert output.last_status == status
+    if status != Responses.GOOD.status:
+        print(output.last_message)
+    else:
+        assert isinstance(output.data.value["credentials"], UserCredentials)
+        assert "new_password" in output.data.value

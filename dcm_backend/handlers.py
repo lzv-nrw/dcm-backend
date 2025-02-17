@@ -1,9 +1,17 @@
 """Input handlers for the 'DCM Backend'-app."""
 
-from data_plumber_http import Object, Property, String, Url, Boolean, Integer
+from data_plumber_http import (
+    Object, Property, String, Url, Boolean, Integer, Array
+)
 
 from dcm_backend.models import (
-    IngestConfig, RosettaBody, JobConfig, Schedule, Repeat
+    IngestConfig,
+    RosettaBody,
+    JobConfig,
+    Schedule,
+    Repeat,
+    UserConfig,
+    UserCredentials,
 )
 
 
@@ -92,7 +100,7 @@ ISODateTime = String(
 )
 
 
-config_post_handler = Object(
+job_config_post_handler = Object(
     model=lambda **kwargs: {"config": JobConfig(**kwargs)},
     properties={
         Property("id", "id_"): String(),
@@ -150,4 +158,53 @@ job_status_filter_handler = Object(
         )
     },
     accept_only=["status", "id"]
+).assemble()
+
+
+user_config_post_handler = Object(
+    model=lambda **kwargs: {"config": UserConfig(**kwargs)},
+    properties={
+        Property("userId", "user_id", required=True): String(),
+        Property("externalId", "external_id"): String(),
+        Property("firstname"): String(),
+        Property("lastname"): String(),
+        Property("email"): String(
+            pattern=r"[a-zA-Z0-9+._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+"
+        ),
+        Property("roles"): Array(
+            items=String()
+        ),
+    },
+    accept_only=[
+        "userId",
+        "externalId",
+        "firstname",
+        "lastname",
+        "email",
+        "roles",
+    ],
+).assemble()
+
+
+user_login_handler = Object(
+    model=lambda **kwargs: {"credentials": UserCredentials(**kwargs)},
+    properties={
+        Property("userId", "user_id", required=True): String(),
+        Property("password", required=True): String(),
+    },
+    accept_only=["userId", "password"],
+).assemble()
+
+
+user_change_password_handler = Object(
+    model=lambda **kwargs: {
+        "credentials": UserCredentials(kwargs["user_id"], kwargs["password"]),
+        "new_password": kwargs["new_password"],
+    },
+    properties={
+        Property("userId", "user_id", required=True): String(),
+        Property("password", required=True): String(),
+        Property("newPassword", "new_password", required=True): String(),
+    },
+    accept_only=["userId", "password", "newPassword"],
 ).assemble()

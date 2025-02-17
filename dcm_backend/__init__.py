@@ -8,6 +8,7 @@ from typing import Optional
 import threading
 
 from flask import Flask
+from argon2 import PasswordHasher
 from dcm_common.db import KeyValueStoreAdapter
 from dcm_common.orchestration import (
     ScalableOrchestrator, orchestrator_controls_bp
@@ -18,7 +19,7 @@ from dcm_common.services import extensions as common_extensions
 from dcm_backend.config import AppConfig
 from dcm_backend.components import Scheduler, JobProcessorAdapter
 from dcm_backend.views import (
-    IngestView, ConfigurationView, JobView, get_scheduling_controls
+    IngestView, ConfigurationView, JobView, UserView, get_scheduling_controls
 )
 from dcm_backend.models import Report, JobConfig
 from dcm_backend import extensions
@@ -28,8 +29,9 @@ def app_factory(
     config: AppConfig,
     queue: Optional[KeyValueStoreAdapter] = None,
     registry: Optional[KeyValueStoreAdapter] = None,
-    config_db: Optional[KeyValueStoreAdapter] = None,
+    job_config_db: Optional[KeyValueStoreAdapter] = None,
     report_db: Optional[KeyValueStoreAdapter] = None,
+    user_config_db: Optional[KeyValueStoreAdapter] = None,
     as_process: bool = False
 ):
     """
@@ -40,12 +42,14 @@ def app_factory(
              (default None; use `MemoryStore`)
     registry -- registry adapter override
                 (default None; use `MemoryStore`)
-    config_db -- configuration-database adapter
-                 (default None; use `MemoryStore`)
+    job_config_db -- job configuration-database adapter
+                     (default None; use `MemoryStore`)
     report_db -- report-database adapter;
                   this adapter needs to be linked to the same resource
                   that the Job Processor uses for writing reports
                   (default None; use `MemoryStore`)
+    user_config_db -- user configuration-database adapter
+                      (default None; use `MemoryStore`)
     as_process -- whether the app is intended to be run as process via
                   `app.run`; if `True`, startup tasks like starting
                   orchestration-daemon are prepended to `app.run`
@@ -71,39 +75,61 @@ def app_factory(
             daemon=True
         ).start()
     )
-    for config_id in (config_db or config.config_db).keys():
+    for job_id in (job_config_db or config.job_config_db).keys():
         scheduler.schedule(
             JobConfig.from_json(
-                (config_db or config.config_db).read(config_id)
+                (job_config_db or config.job_config_db).read(job_id)
             )
         )
     orchestrator = ScalableOrchestrator(
         queue=queue or config.queue, registry=registry or config.registry
     )
+    password_hasher = PasswordHasher()
     view_ingest = IngestView(
         config=config,
         report_type=Report,
         orchestrator=orchestrator,
         context=IngestView.NAME
     )
-    view_configuration = ConfigurationView(
+    configuration_view = ConfigurationView(
         config,
-        config_db or config.config_db,
-        scheduler
+        job_config_db or config.job_config_db,
+        user_config_db or config.user_config_db,
+        scheduler,
+        password_hasher
     )
     job_view = JobView(
         config,
-        config_db or config.config_db,
+        job_config_db or config.job_config_db,
         report_db or config.report_db,
         scheduler,
         adapter
     )
+    user_view = UserView(
+        config,
+        user_config_db or config.user_config_db,
+        password_hasher
+    )
+
+    # setup demo-users
+    if config.CREATE_DEMO_USERS:
+        for user in [
+            configuration_view.create_user(
+                "Einstein", password="relativity"
+            ).with_secret.json,
+            configuration_view.create_user(
+                "Curie", password="radioactivity"
+            ).with_secret.json,
+        ]:
+            (user_config_db or config.user_config_db).write(
+                user["userId"], user
+            )
 
     # register extensions
     if config.ALLOW_CORS:
         common_extensions.cors(app)
     orchestratord = common_extensions.orchestration(
-        app, config, orchestrator, "Transfer Module", as_process
+        app, config, orchestrator, "Backend", as_process
     )
     scheduled = extensions.scheduling(
         app, config, scheduler, as_process
@@ -150,11 +176,15 @@ def app_factory(
         url_prefix="/"
     )
     app.register_blueprint(
-        view_configuration.get_blueprint(),
+        configuration_view.get_blueprint(),
         url_prefix="/"
     )
     app.register_blueprint(
         job_view.get_blueprint(),
+        url_prefix="/"
+    )
+    app.register_blueprint(
+        user_view.get_blueprint(),
         url_prefix="/"
     )
 

@@ -51,7 +51,7 @@ def _client_and_dbs(testing_config):
     report_db = NativeKeyValueStoreAdapter(MemoryStore())
     return (
         app_factory(
-            testing_config(), config_db=config_db, report_db=report_db
+            testing_config(), job_config_db=config_db, report_db=report_db
         ).test_client(),
         config_db,
         report_db
@@ -142,7 +142,7 @@ def test_options(client_and_db, minimal_config, minimal_info):
     client, _, report_db = client_and_db
 
     # prepare scheduling and report_db
-    client.post("/configure", json=minimal_config)
+    client.post("/job/configure", json=minimal_config)
     minimal_info["config"] = {"original_body": {"process": {}}}
     minimal_info_queued = deepcopy(minimal_info)
     minimal_info_running = deepcopy(minimal_info)

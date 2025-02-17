@@ -3,8 +3,10 @@
 The 'DCM Backend'-API provides functionality to
 * trigger an ingest in the archive-system,
 * collect the current ingest-status,
-* manage job configurations, and
-* control job execution.
+* manage job configurations,
+* control job execution,
+* authenticate local users, and
+* manage user configurations.
 
 This repository contains the corresponding Flask app definition.
 For the associated OpenAPI-document, please refer to the sibling package [`dcm-backend-api`](https://github.com/lzv-nrw/dcm-backend-api).
@@ -55,20 +57,18 @@ Using a virtual environment is recommended.
    ```
    or run a gui-application, like Swagger UI, based on the OpenAPI-document provided in the sibling package [`dcm-backend-api`](https://github.com/lzv-nrw/dcm-backend-api).
 
-## Run with docker compose
-Simply run
+## Docker
+Build an image using, for example,
 ```
-docker compose up
+docker build -t dcm/backend:dev .
 ```
-By default, the app listens on port 8080.
-To rebuild an already existing image, run `docker compose build`.
+Then run with
+```
+docker run --rm --name=backend -v ~/.rosetta/rosetta_auth:/home/dcm/.rosetta/rosetta_auth -p 8080:80 dcm/backend:dev
+```
+and test by making a GET-http://localhost:8080/identify request.
 
-Additionally, a Swagger UI is hosted at
-```
-http://localhost/docs
-```
-
-Afterwards, stop the process and enter `docker compose down`.
+For additional information, refer to the documentation [here](https://github.com/lzv-nrw/digital-curation-manager).
 
 ## Tests
 Install additional dev-dependencies with
@@ -84,12 +84,21 @@ pytest -v -s
 Service-specific environment variables are
 
 ### Database
-* `CONFIGURATION_DATABASE_ADAPTER` [DEFAULT "native"]: which adapter-type to use for the configuration database
-* `CONFIGURATION_DATABASE_SETTINGS` [DEFAULT {"backend": "memory"}]: JSON object containing the relevant information for initializing the adapter
+* `JOB_CONFIGURATION_DATABASE_ADAPTER` [DEFAULT "native"]: which adapter-type to use for the job configuration database
+* `JOB_CONFIGURATION_DATABASE_SETTINGS` [DEFAULT {"backend": "memory"}]: JSON object containing the relevant information for initializing the job configuration database adapter
 * `REPORT_DATABASE_ADAPTER` [DEFAULT "native"]: which adapter-type to use for the job report database
-* `REPORT_DATABASE_SETTINGS` [DEFAULT {"backend": "memory"}]: JSON object containing the relevant information for initializing the adapter
+* `REPORT_DATABASE_SETTINGS` [DEFAULT {"backend": "memory"}]: JSON object containing the relevant information for initializing the job report database adapter
+* `USER_CONFIGURATION_DATABASE_ADAPTER` [DEFAULT "native"]: which adapter-type to use for the user configuration database
+* `USER_CONFIGURATION_DATABASE_SETTINGS` [DEFAULT {"backend": "memory"}]: JSON object containing the relevant information for initializing the user configuration database adapter
 
-### SCHEDULING
+### Users
+* `CREATE_DEMO_USERS` [DEFAULT 0]: whether demo users are created at startup
+* `REQUIRE_USER_ACTIVATION` [DEFAULT 1]: whether new users are required to set password before login
+* `USER_ACTIVATION_URL_FMT` [DEFAULT "ERROR: ..."]: python format-string containing `..{password}..` as key; used to format user-activation urls
+
+  Two demo users are created. User 'Einstein' with password 'relativity' and user 'Curie' with password 'radioactivity'.
+
+### Scheduling
 * `SCHEDULING_CONTROLS_API` [DEFAULT 0] whether the scheduling-api is available
 * `SCHEDULING_AT_STARTUP` [DEFAULT 1] whether job scheduling-loop is active at startup
 * `SCHEDULING_INTERVAL` [DEFAULT 1.0] loop interval in seconds
