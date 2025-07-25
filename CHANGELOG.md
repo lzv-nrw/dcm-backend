@@ -1,5 +1,34 @@
 # Changelog
 
+## [3.0.0] - 2025-07-25
+
+### Changed
+
+- **Breaking:** refactored ingest-API and related components
+- **Breaking:** switched to template-based jobs
+- **Breaking:** refactored job-API
+- **Breaking:** refactored `Scheduler` component and related components (added support for scheduled onetime-execution, monthly-execution, time-specific execution)
+- refactored and extended app-extensions
+- **Breaking:** replaced key-value store-database with sql-database
+- **Breaking:** limited incremental updates for user configurations to only secrets
+- **Breaking:** replaced roles with groups-object in UserConfig-model
+
+### Added
+
+- added creation/update-metadata to UserConfig-model
+- added support for Preparation Module in the dcm-pipeline
+- added database-related app-extensions
+- added generation of extended demo-data
+- added new template-API endpoints
+- added new workspace-API endpoints
+- added *demo* administrator-account
+
+### Fixed
+
+- fixed orchestrator initialization (missing `nprocesses`-arg)
+- fixed data-model of UserConfig (broken `dataclass`-decorator)
+- fixed handling of termination signals in scheduler
+
 ## [2.0.0] - 2025-02-17
 
 ### Changed

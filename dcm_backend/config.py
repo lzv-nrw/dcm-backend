@@ -6,11 +6,12 @@ from importlib.metadata import version
 import json
 
 import yaml
-from dcm_common.services import OrchestratedAppConfig
+from dcm_common.services import OrchestratedAppConfig, DBConfig
+import dcm_database
 import dcm_backend_api
 
 
-class AppConfig(OrchestratedAppConfig):
+class AppConfig(OrchestratedAppConfig, DBConfig):
     """
     Configuration for the dcm-backend-app.
     """
@@ -20,6 +21,10 @@ class AppConfig(OrchestratedAppConfig):
     # include this in config for compatible with common orchestration-
     # app extension
     FS_MOUNT_POINT = Path.cwd()
+
+    # ------ EXTENSIONS ------
+    DB_INIT_STARTUP_INTERVAL = 1.0
+    SCHEDULER_INIT_STARTUP_INTERVAL = 1.0
 
     # ------ INGEST (ARCHIVE_CONTROLLER) ------
     ROSETTA_AUTH_FILE = Path(
@@ -39,30 +44,15 @@ class AppConfig(OrchestratedAppConfig):
     )
 
     # ------ DATABASE ------
-    JOB_CONFIGURATION_DATABASE_ADAPTER = (
-        os.environ.get("JOB_CONFIGURATION_DATABASE_ADAPTER")
-    )
-    JOB_CONFIGURATION_DATABASE_SETTINGS = (
-        json.loads(os.environ["JOB_CONFIGURATION_DATABASE_SETTINGS"])
-        if "JOB_CONFIGURATION_DATABASE_SETTINGS" in os.environ else None
-    )
-    REPORT_DATABASE_ADAPTER = (
-        os.environ.get("REPORT_DATABASE_ADAPTER")
-    )
-    REPORT_DATABASE_SETTINGS = (
-        json.loads(os.environ["REPORT_DATABASE_SETTINGS"])
-        if "REPORT_DATABASE_SETTINGS" in os.environ else None
-    )
-    USER_CONFIGURATION_DATABASE_ADAPTER = (
-        os.environ.get("USER_CONFIGURATION_DATABASE_ADAPTER")
-    )
-    USER_CONFIGURATION_DATABASE_SETTINGS = (
-        json.loads(os.environ["USER_CONFIGURATION_DATABASE_SETTINGS"])
-        if "USER_CONFIGURATION_DATABASE_SETTINGS" in os.environ else None
-    )
+    DB_SCHEMA = Path(dcm_database.__file__).parent / "init.sql"
+    DB_LOAD_SCHEMA = (int(os.environ.get("DB_LOAD_SCHEMA") or 0)) == 1
+    DB_GENERATE_DEMO = (int(os.environ.get("DB_GENERATE_DEMO") or 0)) == 1
 
     # ------ USERS ------
-    CREATE_DEMO_USERS = (int(os.environ.get("CREATE_DEMO_USERS") or 0)) == 1
+    DB_GENERATE_DEMO_USERS = (
+        int(os.environ.get("DB_GENERATE_DEMO_USERS") or 0)
+    ) == 1
+    DB_DEMO_ADMIN_PW = os.environ.get("DB_DEMO_ADMIN_PW")
     REQUIRE_USER_ACTIVATION = (
         (int(os.environ.get("REQUIRE_USER_ACTIVATION") or 1)) == 1
     )
@@ -78,13 +68,13 @@ class AppConfig(OrchestratedAppConfig):
     SCHEDULING_AT_STARTUP = (
         (int(os.environ.get("SCHEDULING_AT_STARTUP") or 1)) == 1
     )
-    SCHEDULING_INTERVAL = float(os.environ.get("SCHEDULING_INTERVAL") or 1.0)
     SCHEDULING_DAEMON_INTERVAL = 1.0
+    SCHEDULING_TIMEZONE = os.environ.get("SCHEDULING_TIMEZONE")
 
     # ------ JOB ------
     JOB_PROCESSOR_TIMEOUT = int(os.environ.get("JOB_PROCESSOR_TIMEOUT") or 30)
     JOB_PROCESSOR_HOST = (
-        os.environ.get("JOB_PROCESSOR_HOST") or "http://localhost:8086"
+        os.environ.get("JOB_PROCESSOR_HOST") or "http://localhost:8087"
     )
     JOB_PROCESSOR_POLL_INTERVAL = float(
         os.environ.get("JOB_PROCESSOR_POLL_INTERVAL") or 1.0
@@ -98,48 +88,6 @@ class AppConfig(OrchestratedAppConfig):
         API_DOCUMENT.read_text(encoding="utf-8"),
         Loader=yaml.SafeLoader
     )
-
-    def __init__(self) -> None:
-        # job configuration-db
-        self._job_config_db_settings = {
-            "type": self.JOB_CONFIGURATION_DATABASE_ADAPTER or "native",
-            "settings": (
-                self.JOB_CONFIGURATION_DATABASE_SETTINGS
-                or {"backend": "memory"}
-            )
-        }
-        self.job_config_db = self._load_adapter(
-            "job_config_db", self._job_config_db_settings["type"],
-            self._job_config_db_settings["settings"]
-        )
-
-        # report-db
-        self._report_db_settings = {
-            "type": self.REPORT_DATABASE_ADAPTER or "native",
-            "settings": (
-                self.REPORT_DATABASE_SETTINGS
-                or {"backend": "memory"}
-            )
-        }
-        self.report_db = self._load_adapter(
-            "report_db", self._report_db_settings["type"],
-            self._report_db_settings["settings"]
-        )
-
-        # user configuration-db
-        self._user_config_db_settings = {
-            "type": self.USER_CONFIGURATION_DATABASE_ADAPTER or "native",
-            "settings": (
-                self.USER_CONFIGURATION_DATABASE_SETTINGS
-                or {"backend": "memory"}
-            )
-        }
-        self.user_config_db = self._load_adapter(
-            "user_config_db", self._user_config_db_settings["type"],
-            self._user_config_db_settings["settings"]
-        )
-
-        super().__init__()
 
     def set_identity(self) -> None:
         super().set_identity()
@@ -171,15 +119,11 @@ class AppConfig(OrchestratedAppConfig):
         }
         if self.ARCHIVE_API_PROXY is not None:
             settings["ingest"]["proxy"] = self.ARCHIVE_API_PROXY
-        settings["database"] = {
-            "jobConfiguration": self._job_config_db_settings,
-            "report": self._report_db_settings,
-            "userConfiguration": self._user_config_db_settings,
-        }
+        settings["database"]["schemaVersion"] = version("dcm-database")
         settings["scheduling"] = {
             "controls_api": self.SCHEDULING_CONTROLS_API,
             "at_startup": self.SCHEDULING_AT_STARTUP,
-            "interval": self.SCHEDULING_INTERVAL,
+            "timezone": self.SCHEDULING_TIMEZONE,
         }
         settings["job"] = {
             "timeout": {"duration": self.JOB_PROCESSOR_TIMEOUT},

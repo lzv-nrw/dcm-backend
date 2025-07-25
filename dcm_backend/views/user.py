@@ -5,15 +5,20 @@ User View-class definition
 from typing import Optional
 import sys
 
-from flask import Blueprint, Response
+from flask import Blueprint, Response, jsonify
 from argon2 import PasswordHasher
 from data_plumber_http.decorators import flask_handler, flask_args, flask_json
-from dcm_common.db import KeyValueStoreAdapter
+from dcm_common.db import SQLAdapter
 from dcm_common import services
 from dcm_common.services.views.interface import View
 
 from dcm_backend.config import AppConfig
-from dcm_backend.models import UserConfig, UserCredentials
+from dcm_backend.models import (
+    UserConfig,
+    GroupMembership,
+    UserSecrets,
+    UserCredentials,
+)
 from dcm_backend import handlers
 
 
@@ -23,7 +28,7 @@ class UserView(View):
 
     Keyword arguments:
     config -- `AppConfig`-object
-    config_db -- adapter for user configuration-database
+    db -- database adapter
     password_hasher -- instance of argon2.PasswordHasher
     """
 
@@ -32,49 +37,63 @@ class UserView(View):
     def __init__(
         self,
         config: AppConfig,
-        config_db: KeyValueStoreAdapter,
+        db: SQLAdapter,
         password_hasher: PasswordHasher,
     ) -> None:
         super().__init__(config)
-        self.config_db = config_db
+        self.db = db
         self.password_hasher = password_hasher
 
     def _validate_credentials(
         self, credentials: UserCredentials
-    ) -> tuple[bool, Optional[UserConfig]]:
+    ) -> tuple[bool, Optional[UserConfig], Optional[UserSecrets]]:
         """
         Returns `True` and an associated `UserConfig` if the
         `credentials` are valid.
         """
-        # collect from database
-        _config = self.config_db.read(credentials.user_id)
-        if _config is None:
+        # collect config from database
+        _config = self.db.get_rows(
+            "user_configs", credentials.username, "username"
+        ).eval()
+        if len(_config) != 1:
             print(
-                f"Unknown user '{credentials.user_id}' attempted login.",
+                f"Unknown user '{credentials.username}' attempted login.",
                 file=sys.stderr,
             )
-            return False, None
+            return False, None, None
 
         # convert into UserConfig
-        config = UserConfig.from_json(_config)
+        config = UserConfig.from_row(_config[0])
+
+        # collect secrets from database
+        _secrets = self.db.get_rows(
+            "user_secrets", config.id_, "user_id"
+        ).eval()
+        if len(_secrets) != 1:
+            print(
+                f"Unable to fetch secrets for user '{credentials.username}'.",
+                file=sys.stderr,
+            )
+            return False, None, None
+        secrets = UserSecrets.from_row(_secrets[0])
 
         # validate
         try:
             return (
-                config.user_id == credentials.user_id
-                and self.password_hasher.verify(
-                    config.with_secret.password, credentials.password
+                self.password_hasher.verify(
+                    secrets.password, credentials.password
                 ),
-                config
+                config,
+                secrets,
             )
         # pylint: disable=broad-exception-caught
         except Exception as exc_info:
             print(
-                f"Failed login attempt for user '{credentials.user_id}': "
+                f"Failed login attempt for user '{credentials.username}': "
                 + str(exc_info),
                 file=sys.stderr,
             )
-            return False, None
+            return False, None, None
 
     def _login(self, bp: Blueprint):
         @bp.route("/user", methods=["POST"], provide_automatic_options=False)
@@ -88,13 +107,15 @@ class UserView(View):
         )
         def login(credentials: UserCredentials):
             """Determine user authentication."""
-            valid, config = self._validate_credentials(credentials)
+            valid, config, secrets = self._validate_credentials(credentials)
             if not valid:
-                return Response("FAILED", mimetype="text/plain", status=401)
+                return Response(
+                    "Unauthorized", mimetype="text/plain", status=401
+                )
 
             if (
                 self.config.REQUIRE_USER_ACTIVATION
-                and not config.with_secret.active
+                and config.status == "inactive"
             ):
                 return Response(
                     "This account is currently inactive, activate by "
@@ -106,27 +127,37 @@ class UserView(View):
             # as recommended by the author: check for re-hashing requirement
             # https://argon2-cffi.readthedocs.io/en/stable/api.html#argon2.PasswordHasher.check_needs_rehash
             if self.password_hasher.check_needs_rehash(
-                config.with_secret.password
+                secrets.password
             ):
                 print(
                     "Argon2: re-hashing password for user "
-                    + f"'{credentials.user_id}'.",
+                    + f"'{credentials.username}'.",
                     file=sys.stderr,
                 )
                 # replace password and write back with new password
-                self.config_db.write(
-                    credentials.user_id,
-                    UserConfig.from_json(
-                        config.json
-                        | {
-                            "password": self.password_hasher.hash(
-                                credentials.password
-                            )
-                        }
-                    ).with_secret.json,
+                secrets.password = self.password_hasher.hash(
+                    credentials.password
                 )
+                self.db.update("user_secrets", secrets.row).eval()
 
-            return Response("OK", mimetype="text/plain", status=200)
+            print(
+                f"Successful login for user '{credentials.username}'.",
+                file=sys.stderr,
+            )
+            config.groups.extend(
+                map(
+                    lambda x: GroupMembership(
+                        x["group_id"], x["workspace_id"]
+                    ),
+                    self.db.get_rows(
+                        "user_groups",
+                        config.id_,
+                        "user_id",
+                        ["group_id", "workspace_id"],
+                    ).eval(),
+                )
+            )
+            return jsonify(config.json), 200
 
     def _change_password(self, bp: Blueprint):
         @bp.route(
@@ -142,22 +173,26 @@ class UserView(View):
         )
         def change_password(credentials: UserCredentials, new_password: str):
             """Change user password."""
-            valid, config = self._validate_credentials(credentials)
+            valid, config, secrets = self._validate_credentials(credentials)
             if not valid:
-                return Response("FAILED", mimetype="text/plain", status=401)
+                return Response(
+                    "Unauthorized", mimetype="text/plain", status=401
+                )
 
-            # replace password and write back with new password
-            self.config_db.write(
-                credentials.user_id,
-                UserConfig.from_json(
-                    config.json
-                    | {
-                        "password": self.password_hasher.hash(new_password),
-                        "active": True
-                    }
-                ).with_secret.json,
+            with self.db.new_transaction() as t:
+                # replace password and write back with new password
+                secrets.password = self.password_hasher.hash(new_password)
+                t.add_update("user_secrets", secrets.row)
+
+                # update user status
+                config.status = "ok"
+                t.add_update("user_configs", config.row)
+            t.result.eval("changing user password")
+
+            print(
+                f"Changed password for user '{credentials.username}'.",
+                file=sys.stderr,
             )
-
             return Response("OK", mimetype="text/plain", status=200)
 
     def configure_bp(self, bp: Blueprint, *args, **kwargs) -> None:

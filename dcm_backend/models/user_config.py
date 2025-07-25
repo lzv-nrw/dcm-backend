@@ -2,58 +2,103 @@
 UserConfig data-model definition
 """
 
-from typing import Optional
-from dataclasses import dataclass, field
+from typing import Optional, Mapping
+from dataclasses import dataclass
 
-from dcm_common.models import DataModel
+from dcm_common.models import DataModel, JSONObject
+
+from .cu_metadata import CuMetadata
 
 
-@dataclass(kw_only=True)
-class UserConfig(DataModel):
+@dataclass
+class GroupMembership(DataModel):
+    """
+    Data model for a group membership.
+
+    Keyword arguments:
+    id -- group identifier
+    workspace -- workspace identifier
+    """
+    id_: str
+    workspace: Optional[str] = None
+
+    @DataModel.serialization_handler("id_", "id")
+    @classmethod
+    def id__serialization_handler(cls, value):
+        """Handles `id_`-serialization."""
+        return value
+
+    @DataModel.deserialization_handler("id_", "id")
+    @classmethod
+    def id__deserialization_handler(cls, value):
+        """Handles `id_`-deserialization."""
+        return value
+
+
+class UserConfig(CuMetadata):
     """
     Data model for a user config.
 
-    This model excludes `_password` and `_active` from serialization.
-    See also `UserConfig.with_secret`.
-
     Keyword arguments:
-    user_id -- local user id
+    id_ -- local user id
     external_id -- external user id
+    username -- user name
+    status -- account status
+              (default "inactive")
     firstname -- first name
     lastname -- last name
     email -- email address
-    roles -- list of the user roles
-    _active -- whether the user can log in (has been activated)
-               (excluded from default serialization, see
-               `with_secret`)
-    _password -- local user secret
-                 (excluded from default serialization, see
-                 `with_secret`)
+    groups -- list of group memberships
+              (default empty list)
+    widget_config -- widget configuration
+
+    Inherites metadata-fields from `CuMetadata`.
     """
-    user_id: str
+    id_: Optional[str] = None
     external_id: Optional[str] = None
+    username: str
+    status: Optional[str] = None
     firstname: Optional[str] = None
     lastname: Optional[str] = None
     email: Optional[str] = None
-    roles: list[str] = field(default_factory=list)
-    _active: bool = True
-    _password: Optional[str] = None
+    groups: Optional[list[GroupMembership]] = None
+    widget_config: Optional[JSONObject] = None
 
-    @property
-    def with_secret(self) -> "_UserConfigWithSecret":
-        """Converts this `UserConfig` into a `_UserConfigWithSecret`."""
-        return _UserConfigWithSecret(**self.__dict__)
+    def __init__(
+        self,
+        *,
+        id_: Optional[str] = None,
+        external_id: Optional[str] = None,
+        username: str,
+        status: Optional[str] = None,
+        firstname: Optional[str] = None,
+        lastname: Optional[str] = None,
+        email: Optional[str] = None,
+        groups: Optional[list[GroupMembership]] = None,
+        widget_config: Optional[JSONObject] = None,
+        **kwargs,
+    ) -> None:
+        self.id_ = id_
+        self.external_id = external_id
+        self.username = username
+        self.status = "inactive" if status is None else status
+        self.firstname = firstname
+        self.lastname = lastname
+        self.email = email
+        self.groups = [] if groups is None else groups
+        self.widget_config = widget_config
+        super().__init__(**kwargs)
 
-    @DataModel.serialization_handler("user_id", "userId")
+    @DataModel.serialization_handler("id_", "id")
     @classmethod
-    def user_id_serialization_handler(cls, value):
-        """Handles `user_id`-serialization."""
+    def id__serialization_handler(cls, value):
+        """Handles `id_`-serialization."""
         return value
 
-    @DataModel.deserialization_handler("user_id", "userId")
+    @DataModel.deserialization_handler("id_", "id")
     @classmethod
-    def user_id_deserialization_handler(cls, value):
-        """Handles `user_id`-deserialization."""
+    def id__deserialization_handler(cls, value):
+        """Handles `id_`-deserialization."""
         return value
 
     @DataModel.serialization_handler("external_id", "externalId")
@@ -72,72 +117,109 @@ class UserConfig(DataModel):
             DataModel.skip()
         return value
 
-    @DataModel.deserialization_handler("_active", "active")
+    @DataModel.deserialization_handler("groups")
     @classmethod
-    def _active_deserialization_handler(cls, value):
-        """Handles `_active`-deserialization."""
+    def groups_deserialization_handler(cls, value):
+        """Handles `groups`-deserialization."""
+        if value is None:
+            DataModel.skip()
+        return [GroupMembership.from_json(group) for group in value]
+
+    @DataModel.serialization_handler("widget_config", "widgetConfig")
+    @classmethod
+    def widget_config_serialization_handler(cls, value):
+        """Handles `widget_config`-serialization."""
         if value is None:
             DataModel.skip()
         return value
 
-    @DataModel.deserialization_handler("_password", "password")
+    @DataModel.deserialization_handler("widget_config", "widgetConfig")
     @classmethod
-    def _password_deserialization_handler(cls, value):
-        """Handles `_password`-deserialization."""
+    def widget_config_deserialization_handler(cls, value):
+        """Handles `widget_config`-deserialization."""
+        if value is None:
+            DataModel.skip()
         return value
 
-    def set_active(self, value: bool) -> None:
-        """Set `active`."""
-        self._active = value
+    @property
+    def row(self) -> dict:
+        """Convert to database row."""
+        row = {
+            "external_id": self.external_id,
+            "username": self.username,
+            "status": self.status,
+            "firstname": self.firstname,
+            "lastname": self.lastname,
+            "email": self.email,
+            "widget_config": self.widget_config,
+        }
+        if self.id_ is not None:
+            row["id"] = self.id_
+        if self.user_created is not None:
+            row["user_created"] = self.user_created
+        if self.datetime_created is not None:
+            row["datetime_created"] = self.datetime_created
+        if self.user_modified is not None:
+            row["user_modified"] = self.user_modified
+        if self.datetime_modified is not None:
+            row["datetime_modified"] = self.datetime_modified
+        return row
 
-    def set_password(self, value: Optional[str]) -> None:
-        """Set `_password`."""
-        self._password = value
+    @classmethod
+    def from_row(cls, row: Mapping) -> "UserConfig":
+        """Initialize instance from database row."""
+        row_ = row.copy()
+        row_["id_"] = row["id"]
+        del row_["id"]
+        return cls(**row_)
+
+
+@dataclass(kw_only=True)
+class UserSecrets(DataModel):
+    """Data model for user secrets."""
+    id_: Optional[str] = None
+    user_id: Optional[str] = None
+    password: str
+
+    @property
+    def row(self) -> dict:
+        """Convert to database row."""
+        row = {
+            "user_id": self.user_id,
+            "password": self.password,
+        }
+        if self.id_ is not None:
+            row["id"] = self.id_
+        return row
+
+    @classmethod
+    def from_row(cls, row: Mapping) -> "UserSecrets":
+        """Initialize instance from database row."""
+        row["id_"] = row["id"]
+        del row["id"]
+        return cls(**row)
 
 
 @dataclass
-class _UserConfigWithSecret(UserConfig):
-    """
-    Extension of data model for a user config which includes
-    (de-)serialization of `_password`.
-    """
-    @DataModel.serialization_handler("_active", "active")
-    @classmethod
-    def _active_serialization_handler(cls, value):
-        """Handles `_active`-serialization."""
-        return value
-
-    @DataModel.serialization_handler("_password", "password")
-    @classmethod
-    def _password_serialization_handler(cls, value):
-        """Handles `_password`-serialization."""
-        return value
-
-    @property
-    def active(self) -> bool:
-        """Returns `_active`."""
-        return self._active
-
-    @property
-    def password(self) -> Optional[str]:
-        """Returns `_password`."""
-        return self._password
+class UserConfigWithSecrets(DataModel):
+    config: UserConfig
+    secrets: UserSecrets
 
 
 @dataclass
 class UserCredentials(DataModel):
     """Data model for user credentials."""
-    user_id: str
+    username: str
     password: str
 
-    @DataModel.serialization_handler("user_id", "userId")
+    @DataModel.serialization_handler("username", "userId")
     @classmethod
-    def user_id_serialization_handler(cls, value):
-        """Handles `user_id`-serialization."""
+    def username_serialization_handler(cls, value):
+        """Handles `username`-serialization."""
         return value
 
-    @DataModel.deserialization_handler("user_id", "userId")
+    @DataModel.deserialization_handler("username", "userId")
     @classmethod
-    def user_id_deserialization_handler(cls, value):
-        """Handles `user_id`-deserialization."""
+    def username_deserialization_handler(cls, value):
+        """Handles `username`-deserialization."""
         return value

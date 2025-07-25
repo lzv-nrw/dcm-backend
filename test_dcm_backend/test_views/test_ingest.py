@@ -1,27 +1,23 @@
 """Test-module for ingest-endpoint."""
 
+from flask import jsonify
 from dcm_common import LoggingContext as Context
 
 
-def test_ingest_minimal(
-    client, minimal_request_body, wait_for_report,
-    temp_folder, test_subdir,
-    run_rosetta_dummy
+def test_post_ingest_minimal(
+    client,
+    minimal_request_body,
+    wait_for_report,
+    rosetta_stub,
+    run_service,
 ):
     """Test basic functionality of /ingest-POST endpoint."""
 
     # run dummy Rosetta instance
-    run_rosetta_dummy()
-
-    assert (
-        temp_folder / test_subdir
-    ).is_dir()
+    run_service(rosetta_stub, port=5050)
 
     # submit job
-    response = client.post(
-        "/ingest",
-        json=minimal_request_body
-    )
+    response = client.post("/ingest", json=minimal_request_body)
     assert client.put("/orchestration?until-idle", json={}).status_code == 200
     assert response.status_code == 201
     assert response.mimetype == "application/json"
@@ -32,17 +28,13 @@ def test_ingest_minimal(
 
     assert Context.ERROR.name not in json["log"]
     assert json["data"]["success"]
-    assert "deposit" in json["data"]
-    assert "id" in json["data"]["deposit"]
-    assert isinstance(json["data"]["deposit"]["id"], str)
-    assert "status" in json["data"]["deposit"]
-    assert json["data"]["deposit"]["status"] == "INPROCESS"
+    assert json["data"]["details"]["archiveApi"] is not None
+    assert json["data"]["details"]["deposit"] is not None
+    assert json["data"]["details"]["sip"] is not None
 
 
-def test_ingest_fail_post_error(
-    client, minimal_request_body, wait_for_report,
-    temp_folder, test_subdir,
-    run_rosetta_dummy
+def test_post_ingest_fail_post_error(
+    client, minimal_request_body, wait_for_report, run_service
 ):
     """
     Test the /ingest-POST endpoint with a requests error
@@ -50,20 +42,19 @@ def test_ingest_fail_post_error(
     """
 
     # run dummy Rosetta instance
-    run_rosetta_dummy(
-        post_response="No Connection",
-        post_error_code=503
+    run_service(
+        routes=[
+            (
+                "/rest/v0/deposits",
+                lambda id_: ("deposit-error", 400),
+                ["POST"],
+            ),
+        ],
+        port=5050,
     )
-
-    assert (
-        temp_folder / test_subdir
-    ).is_dir()
 
     # submit job
-    response = client.post(
-        "/ingest",
-        json=minimal_request_body
-    )
+    response = client.post("/ingest", json=minimal_request_body)
     assert client.put("/orchestration?until-idle", json={}).status_code == 200
 
     assert response.status_code == 201
@@ -76,9 +67,8 @@ def test_ingest_fail_post_error(
     assert not json["data"]["success"]
 
 
-def test_ingest_success_get_error(
-    client, minimal_request_body, wait_for_report,
-    run_rosetta_dummy
+def test_post_ingest_success_get_error(
+    client, minimal_request_body, wait_for_report, run_service
 ):
     """
     Test the /ingest-POST endpoint, when the ingest is successfully triggered,
@@ -86,36 +76,37 @@ def test_ingest_success_get_error(
     """
 
     # run dummy Rosetta instance
-    run_rosetta_dummy(get_error_code=503)
+    fake_deposit = {"id": "x", "sip_id": "y"}
+    run_service(
+        routes=[
+            (
+                "/rest/v0/deposits",
+                lambda: (jsonify(fake_deposit), 200),
+                ["POST"],
+            ),
+            ("/rest/v0/sips/<id_>", lambda id_: (jsonify(None), 400), ["GET"]),
+        ],
+        port=5050,
+    )
 
     # submit job
-    response = client.post(
-        "/ingest",
-        json=minimal_request_body
-    )
+    response = client.post("/ingest", json=minimal_request_body)
     assert client.put("/orchestration?until-idle", json={}).status_code == 200
     json = wait_for_report(client, response.json["value"])
 
     assert Context.ERROR.name in json["log"]
     assert json["data"]["success"]
-    assert json["data"]["deposit"]["status"] == "TRIGGERED"
+    assert json["data"]["details"]["deposit"] == fake_deposit
+    assert "sip" not in json["data"]["details"]
 
 
 def test_get_status_minimal(
-    client, minimal_request_body, wait_for_report, run_rosetta_dummy
+    client, minimal_request_body, wait_for_report, run_service, rosetta_stub
 ):
     """Test basic functionality of /ingest-GET endpoint."""
 
     # run dummy Rosetta instance
-    run_rosetta_dummy()
-
-    response = client.get("/ingest?id=")
-    assert response.status_code == 422
-    assert response.mimetype == "text/plain"
-
-    response = client.get("/ingest?id=abc")
-    assert response.status_code == 502
-    assert response.mimetype == "text/plain"
+    run_service(rosetta_stub, port=5050)
 
     # submit job
     token = client.post("/ingest", json=minimal_request_body).json["value"]
@@ -124,7 +115,58 @@ def test_get_status_minimal(
     # wait until job is completed
     json = wait_for_report(client, token)
 
-    response = client.get(f"/ingest?id={json['data']['deposit']['id']}")
+    response = client.get(
+        f"/ingest?archiveId=a&depositId={json['data']['details']['deposit']['id']}"
+    )
     assert response.status_code == 200
     assert response.mimetype == "application/json"
-    assert response.json["deposit"] == json["data"]["deposit"]
+    assert response.json["success"]
+    assert "details" in response.json
+    assert response.json["details"].get("archiveApi") is not None
+    assert (
+        response.json["details"].get("deposit")
+        == json["data"]["details"]["deposit"]
+    )
+    assert response.json["details"].get("sip") is not None
+
+
+def test_get_status_error(client, run_service):
+    """Test error-handling of /ingest-GET endpoint."""
+
+    # run dummy Rosetta instance
+    run_service(
+        routes=[
+            (
+                "/rest/v0/deposits/<id_>",
+                lambda id_: (
+                    (jsonify({"id": "x0", "sip_id": "y" + id_[1]}), 200)
+                    if id_.startswith("x")
+                    else (jsonify(None), 400)
+                ),
+                ["GET"],
+            ),
+            (
+                "/rest/v0/sips/<id_>",
+                lambda id_: (
+                    (jsonify({"id": "y1"}), 200)
+                    if id_ == "y1"
+                    else (jsonify(None), 400)
+                ),
+                ["GET"],
+            ),
+        ],
+        port=5050,
+    )
+
+    response = client.get("/ingest?archiveId=a&depositId=0000")
+    print(response.data)
+    assert response.status_code == 502
+
+    response = client.get("/ingest?archiveId=a&depositId=x0")
+    print(response.data)
+    assert response.status_code == 502
+
+    response = client.get("/ingest?archiveId=a&depositId=x1")
+    assert response.json["success"]
+    assert response.json["details"].get("deposit") is not None
+    assert response.json["details"].get("sip") is not None

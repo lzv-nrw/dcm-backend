@@ -1,85 +1,111 @@
 """Input handlers for the 'DCM Backend'-app."""
 
+from typing import Any
+from data_plumber import Pipeline
 from data_plumber_http import (
-    Object, Property, String, Url, Boolean, Integer, Array
+    Object,
+    Property,
+    String,
+    Url,
+    Boolean,
+    Integer,
+    Array,
 )
+from data_plumber_http.settings import Responses
 
 from dcm_backend.models import (
     IngestConfig,
-    RosettaBody,
+    RosettaTarget,
     JobConfig,
-    Schedule,
-    Repeat,
     UserConfig,
     UserCredentials,
+    WorkspaceConfig,
+    TemplateConfig,
 )
 
 
-def get_ingest_handler(
-    default_producer: str,
-    default_material_flow: str
-):
+class ConditionalPipeline:
     """
-    Returns parameterized handler
+    Wrapper for conditional Object-handlers.
 
-    Keyword arguments
-    default_producer -- default value for the ID referencing a producer
-                        in Rosetta, when value is not set in the request
-    default_material_flow -- default value for he ID referencing a Material
-                             Flow in Rosetta, when value is not set in the
-                             request
+    On execution, calls either `on_ok` or `on_draft`, depending on
+    `json.status`.
     """
-    return Object(
+
+    PREREQUISITES = Object(
         properties={
-            Property("ingest", required=True): Object(
-                model=IngestConfig,
-                properties={
-                    Property(
-                        "archive_identifier", required=True
-                    ): String(
-                        enum=["rosetta"]
-                    ),
-                    Property("rosetta"): Object(
-                        model=RosettaBody,
-                        properties={
-                            Property(
-                                "subdir",
-                                required=True
-                            ): String(),
-                            Property(
-                                "producer",
-                                default=default_producer
-                            ): String(),
-                            Property(
-                                "material_flow",
-                                default=default_material_flow
-                            ): String()
-                        },
-                        accept_only=["subdir", "producer", "material_flow"]
-                    )
-                },
-                accept_only=[
-                    "archive_identifier", "rosetta"
-                ]
-            ),
-            Property("callbackUrl", name="callback_url"):
-                Url(schemes=["http", "https"])
-        },
-        accept_only=["ingest", "callbackUrl"]
+            Property("status", required=True): String(enum=["ok", "draft"])
+        }
     ).assemble()
 
+    def __init__(self, on_ok: Pipeline, on_draft: Pipeline):
+        self._on_ok = on_ok
+        self._on_draft = on_draft
 
-deposit_id_handler = Object(
+    def run(self, json) -> tuple[Any, str, int]:
+        """Run corresponding pipeline"""
+        prerequisites = self.PREREQUISITES.run(json=json)
+        if prerequisites.last_status != Responses().GOOD.status:
+            return prerequisites
+
+        status = (json or {}).get("status")
+
+        match status:
+            case "ok":
+                return self._on_ok.run(json=json or {})
+            case "draft":
+                return self._on_draft.run(json=json or {})
+
+        raise ValueError(f"Uncaught unknown status '{status}'.")
+
+
+post_ingest_rosetta_target_handler = Object(
+    model=RosettaTarget,
     properties={
-        Property("id", "id_", required=True): String(pattern=r".+")
+        Property("subdirectory", required=True): String(),
     },
-    accept_only=["id"]
+    accept_only=["subdirectory"]
+).assemble(".ingest.target")
+
+
+post_ingest_handler = Object(
+    properties={
+        Property("ingest", required=True): Object(
+            model=IngestConfig,
+            properties={
+                Property("archiveId", "archive_id", required=True): String(),
+                Property("target", required=True): Object(
+                    # proper validation of this object requires the
+                    # contents of the archive configuration (archiveId)
+                    # from the database; validation is therefore
+                    # postponed until the job is executed
+                    free_form=True
+                ),
+            },
+            accept_only=["archiveId", "target"],
+        ),
+        Property("callbackUrl", name="callback_url"): Url(
+            schemes=["http", "https"]
+        ),
+    },
+    accept_only=["ingest", "callbackUrl"],
 ).assemble()
 
 
-def get_config_id_handler(
-    required: bool = True, also_allow: list[str] = None
-):
+get_ingest_handler = Object(
+    properties={
+        Property("archiveId", "archive_id", required=True): String(
+            pattern=r".+"
+        ),
+        Property("depositId", "deposit_id", required=True): String(
+            pattern=r".+"
+        )
+    },
+    accept_only=["archiveId", "depositId"],
+).assemble()
+
+
+def get_config_id_handler(required: bool = True, also_allow: list[str] = None):
     """
     Returns parameterized handler
 
@@ -88,123 +114,460 @@ def get_config_id_handler(
                 (default True)
     """
     return Object(
-        properties={
-            Property("id", "id_", required=required): String()
-        },
-        accept_only=["id"] + (also_allow or [])
+        properties={Property("id", "id_", required=required): String()},
+        accept_only=["id"] + (also_allow or []),
     ).assemble()
+
+
+post_job_handler = Object(
+    properties={
+        Property("id", "id_", required=True): String(),
+        Property(
+            "userTriggered",
+            "user_triggered",
+        ): String(),
+    },
+    accept_only=["id", "userTriggered"],
+).assemble()
 
 
 ISODateTime = String(
     pattern=r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}"
 )
 
+ConfigurationMetadataCreated = {
+    Property("userCreated"): String(),
+    Property("datetimeCreated"): ISODateTime,
+}
 
-job_config_post_handler = Object(
-    model=lambda **kwargs: {"config": JobConfig(**kwargs)},
+ConfigurationMetadataModified = {
+    Property("userModified"): String(),
+    Property("datetimeModified"): ISODateTime,
+}
+
+
+def get_job_config_handler(
+    require_id: bool,
+    accept_creation_md: bool = False,
+    accept_modification_md: bool = False,
+) -> ConditionalPipeline:
+    """
+    Returns a `JobConfig`-handler.
+
+    Keyword arguments:
+    require_id -- if `True`, `id_` is required
+    accept_creation_md -- whether to accept creation-metadata
+    accept_modification_md -- whether to accept modification-metadata
+    """
+    return ConditionalPipeline(
+        on_ok=Object(
+            model=lambda **kwargs: {"config": JobConfig.from_json(kwargs)},
+            properties={
+                Property("templateId", required=True): String(),
+                Property("status", required=True): String(
+                    enum=["draft", "ok"]
+                ),
+                Property("id", required=require_id): String(),
+                Property("name", required=True): String(),
+                Property("description"): String(),
+                Property("contactInfo"): String(),
+                Property("dataSelection"): Object(
+                    # plugin
+                    properties={},
+                    accept_only=[],
+                )
+                | Object(
+                    # hotfolder
+                    properties={Property("path"): String()},
+                    accept_only=["path"],
+                )
+                | Object(
+                    # oai
+                    properties={
+                        Property("identifiers"): Array(items=String()),
+                        Property("sets"): Array(items=String()),
+                        Property("from"): String(
+                            pattern=r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+                        ),
+                        Property("until"): String(
+                            pattern=r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
+                        ),
+                    },
+                    accept_only=["identifiers", "sets", "from", "until"],
+                ),
+                Property("dataProcessing"): Object(
+                    properties={
+                        Property("mapping"): Object(
+                            properties={
+                                Property("type", required=True): String(
+                                    enum=["plugin", "xslt", "python"]
+                                ),
+                                Property("data", required=True): Object(
+                                    properties={
+                                        Property("contents"): String(),
+                                        Property("name"): String(),
+                                        Property("datetimeUploaded"): String(),
+                                    },
+                                    accept_only=[
+                                        "contents",
+                                        "name",
+                                        "datetimeUploaded",
+                                    ],
+                                )
+                                | Object(
+                                    properties={
+                                        Property("plugin"): String(),
+                                        Property("args"): Object(
+                                            free_form=True
+                                        ),
+                                    },
+                                    accept_only=["plugin", "args"],
+                                ),
+                            },
+                            accept_only=["type", "data"],
+                        ),
+                        Property("preparation"): Object(
+                            properties={
+                                Property("rightsOperations"): Array(
+                                    items=Object(free_form=True)
+                                ),
+                                Property("sigPropOperations"): Array(
+                                    items=Object(free_form=True)
+                                ),
+                                Property("preservationOperations"): Array(
+                                    items=Object(free_form=True)
+                                ),
+                            },
+                            accept_only=[
+                                "rightsOperations",
+                                "sigPropOperations",
+                                "preservationOperations",
+                            ],
+                        ),
+                    },
+                    accept_only=["mapping", "preparation"],
+                ),
+                Property("schedule"): Object(
+                    properties={
+                        Property("active", required=True): Boolean(),
+                        Property("start"): ISODateTime,
+                        Property("end"): ISODateTime,
+                        Property("repeat"): Object(
+                            properties={
+                                Property("unit", required=True): String(
+                                    enum=["day", "week", "month"]
+                                ),
+                                Property("interval", required=True): Integer(
+                                    min_value_inclusive=1,
+                                    max_value_inclusive=999999,
+                                ),
+                            },
+                            accept_only=["unit", "interval"],
+                        ),
+                    },
+                    accept_only=["active", "start", "end", "repeat"],
+                ),
+            }
+            | ConfigurationMetadataCreated
+            | ConfigurationMetadataModified,
+            accept_only=[
+                "templateId",
+                "status",
+                "id",
+                "name",
+                "description",
+                "contactInfo",
+                "dataSelection",
+                "dataProcessing",
+                "schedule",
+            ]
+            + (
+                ["userCreated", "datetimeCreated"]
+                if accept_creation_md
+                else []
+            )
+            + (
+                ["userModified", "datetimeModified"]
+                if accept_modification_md
+                else []
+            ),
+        ).assemble(),
+        on_draft=Object(
+            model=lambda **kwargs: {"config": JobConfig.from_json(kwargs)},
+            properties={
+                Property("templateId", required=True): String(),
+                Property("status", required=True): String(
+                    enum=["draft", "ok"]
+                ),
+                Property("id", required=require_id): String(),
+                Property("name"): String(),
+                Property("description"): String(),
+                Property("contactInfo"): String(),
+                Property("dataSelection"): Object(free_form=True),
+                Property("dataProcessing"): Object(free_form=True),
+                Property("schedule"): Object(free_form=True),
+            }
+            | ConfigurationMetadataCreated
+            | ConfigurationMetadataModified,
+            accept_only=[
+                "templateId",
+                "status",
+                "id",
+                "name",
+                "description",
+                "contactInfo",
+                "dataSelection",
+                "dataProcessing",
+                "schedule",
+            ]
+            + (
+                ["userCreated", "datetimeCreated"]
+                if accept_creation_md
+                else []
+            )
+            + (
+                ["userModified", "datetimeModified"]
+                if accept_modification_md
+                else []
+            ),
+        ).assemble(),
+    )
+
+
+get_job_handler = Object(
+    properties={
+        Property("token", required=True): String(),
+        # to simplify implementation, accept anything and check during
+        # running job
+        Property("keys"): String(pattern=r"^[a-zA-Z]+(,[a-zA-Z]+)*$"),
+    },
+    accept_only=["token", "keys"],
+).assemble()
+
+
+# the associated method in the JobView uses a custom command via the
+# database adapter which needs to be done very cautiously
+list_jobs_handler = Object(
     properties={
         Property("id", "id_"): String(),
-        Property("name"): String(),
-        Property("last_modified"): ISODateTime,
-        Property("job", required=True): Object(free_form=True),
-        Property("schedule"): Object(
-            model=Schedule,
-            properties={
-                Property("active", required=True): Boolean(),
-                Property("start"): ISODateTime,
-                Property("end"): ISODateTime,
-                Property("repeat"): Object(
-                    model=Repeat,
+        # to simplify implementation, accept anything and check during
+        # running job
+        Property("status"): String(pattern=r"^[a-z]+(,[a-z]+)*$"),
+        Property("from", "from_"): String(
+            # this pattern is required by the associated method to be safe
+            # change with care!
+            pattern=r"^[0-9]{4}(-[0-9]{2}(-[0-9]{2}(T[0-9]{2}(:[0-9]{2}(:[0-9]{2}(\.[0-9]{6}([+-][0-9]{2}:[0-9]{2})?)?)?)?)?)?)?$"
+        ),
+        Property("to"): String(
+            # this pattern is required by the associated method to be safe
+            # change with care!
+            pattern=r"^[0-9]{4}(-[0-9]{2}(-[0-9]{2}(T[0-9]{2}(:[0-9]{2}(:[0-9]{2}(\.[0-9]{6}([+-][0-9]{2}:[0-9]{2})?)?)?)?)?)?)?$"
+        ),
+        Property("success"): String(enum=["true", "false"]),
+    },
+    accept_only=["id", "status", "from", "to", "success"],
+).assemble()
+
+
+get_records_handler = Object(
+    properties={
+        Property("token"): String(),
+        Property("id", "id_"): String(),
+        Property("success"): String(enum=["true", "false"]),
+    },
+    accept_only=["token", "id", "success"],
+).assemble()
+
+
+def get_user_config_handler(
+    require_id: bool,
+    accept_creation_md: bool = False,
+    accept_modification_md: bool = False,
+) -> Pipeline:
+    """
+    Returns a `UserConfig`-handler.
+
+    Keyword arguments:
+    require_id -- if `True`, `id_` is required
+    accept_creation_md -- whether to accept creation-metadata
+    accept_modification_md -- whether to accept modification-metadata
+    """
+    return Object(
+        model=lambda **kwargs: {"config": UserConfig.from_json(kwargs)},
+        properties={
+            Property("id", required=require_id): String(),
+            Property("externalId"): String(),
+            Property("username", required=True): String(),
+            Property("status"): String(enum=["inactive", "ok"]),
+            Property("firstname"): String(),
+            Property("lastname"): String(),
+            Property("email", required=True): String(
+                pattern=r"[a-zA-Z0-9+._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+"
+            ),
+            Property("groups"): Array(
+                items=Object(
                     properties={
-                        Property("unit", required=True): String(
-                            enum=[
-                                "second", "minute", "hour", "day",
-                                "week", "monday", "tuesday",
-                                "wednesday", "thursday", "friday",
-                                "saturday", "sunday"
-                            ]
-                        ),
-                        Property("interval", required=True): Integer(
-                            min_value_inclusive=1,
-                            max_value_inclusive=999999
-                        )
+                        Property("id", required=True): String(),
+                        Property("workspace"): String(),
                     },
-                    accept_only=["unit", "interval"]
-                ),
-            },
-            accept_only=["active", "start", "end", "repeat"]
-        )
-    },
-    accept_only=["id", "name", "last_modified", "job", "schedule"]
-).assemble()
-
-
-_STATUS_FILTER_OPTIONS = "scheduled|queued|running|completed|aborted"
-
-
-def _initialize_filter_list(status):
-    if status is None:
-        return _STATUS_FILTER_OPTIONS.split("|")
-    if status == "":
-        return []
-    return status.split(",")
-
-
-job_status_filter_handler = Object(
-    model=lambda status=None: {"status": _initialize_filter_list(status)},
-    properties={
-        Property("status"): String(
-            pattern=fr"(({_STATUS_FILTER_OPTIONS})*)(,({_STATUS_FILTER_OPTIONS})+)*"
-        )
-    },
-    accept_only=["status", "id"]
-).assemble()
-
-
-user_config_post_handler = Object(
-    model=lambda **kwargs: {"config": UserConfig(**kwargs)},
-    properties={
-        Property("userId", "user_id", required=True): String(),
-        Property("externalId", "external_id"): String(),
-        Property("firstname"): String(),
-        Property("lastname"): String(),
-        Property("email"): String(
-            pattern=r"[a-zA-Z0-9+._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+"
+                    accept_only=["id", "workspace"],
+                )
+            ),
+            Property("widgetConfig"): Object(free_form=True),
+        }
+        | ConfigurationMetadataCreated
+        | ConfigurationMetadataModified,
+        accept_only=[
+            "id",
+            "externalId",
+            "username",
+            "status",
+            "firstname",
+            "lastname",
+            "email",
+            "groups",
+            "widgetConfig",
+        ]
+        + (["userCreated", "datetimeCreated"] if accept_creation_md else [])
+        + (
+            ["userModified", "datetimeModified"]
+            if accept_modification_md
+            else []
         ),
-        Property("roles"): Array(
-            items=String()
-        ),
-    },
-    accept_only=[
-        "userId",
-        "externalId",
-        "firstname",
-        "lastname",
-        "email",
-        "roles",
-    ],
-).assemble()
+    ).assemble()
 
 
 user_login_handler = Object(
     model=lambda **kwargs: {"credentials": UserCredentials(**kwargs)},
     properties={
-        Property("userId", "user_id", required=True): String(),
+        Property("username", required=True): String(),
         Property("password", required=True): String(),
     },
-    accept_only=["userId", "password"],
+    accept_only=["username", "password"],
 ).assemble()
 
 
 user_change_password_handler = Object(
     model=lambda **kwargs: {
-        "credentials": UserCredentials(kwargs["user_id"], kwargs["password"]),
+        "credentials": UserCredentials(kwargs["username"], kwargs["password"]),
         "new_password": kwargs["new_password"],
     },
     properties={
-        Property("userId", "user_id", required=True): String(),
+        Property("username", required=True): String(),
         Property("password", required=True): String(),
         Property("newPassword", "new_password", required=True): String(),
     },
-    accept_only=["userId", "password", "newPassword"],
+    accept_only=["username", "password", "newPassword"],
 ).assemble()
+
+
+def get_workspace_config_handler(
+    require_id: bool,
+    accept_creation_md: bool = False,
+    accept_modification_md: bool = False,
+) -> Pipeline:
+    """
+    Returns a `WorkspaceConfig`-handler.
+
+    Keyword arguments:
+    require_id -- if `True`, `id_` is required
+    accept_creation_md -- whether to accept creation-metadata
+    accept_modification_md -- whether to accept modification-metadata
+    """
+    return Object(
+        model=lambda **kwargs: {"config": WorkspaceConfig.from_json(kwargs)},
+        properties={
+            Property("id", required=require_id): String(),
+            Property("name", required=True): String(),
+        }
+        | ConfigurationMetadataCreated
+        | ConfigurationMetadataModified,
+        accept_only=["id", "name"]
+        + (["userCreated", "datetimeCreated"] if accept_creation_md else [])
+        + (
+            ["userModified", "datetimeModified"]
+            if accept_modification_md
+            else []
+        ),
+    ).assemble()
+
+
+def get_template_config_handler(
+    require_id: bool,
+    accept_creation_md: bool = False,
+    accept_modification_md: bool = False,
+) -> Pipeline:
+    """
+    Returns a `TemplateConfig`-handler.
+
+    Keyword arguments:
+    require_id -- if `True`, `id_` is required
+    accept_creation_md -- whether to accept creation-metadata
+    accept_modification_md -- whether to accept modification-metadata
+    """
+    return Object(
+        model=lambda **kwargs: {"config": TemplateConfig.from_json(kwargs)},
+        properties={
+            Property("id", required=require_id): String(),
+            Property("status", required=True): String(enum=["draft", "ok"]),
+            Property("workspaceId"): String(),
+            Property("name", required=True): String(),
+            Property("description"): String(),
+            Property("type", required=True): String(
+                enum=["plugin", "oai", "hotfolder"]
+            ),
+            Property("additionalInformation", required=True): Object(
+                properties={
+                    Property("plugin", required=True): String(),
+                    Property("args", required=True): Object(free_form=True),
+                },
+                accept_only=["plugin", "args"],
+            )
+            | Object(
+                properties={
+                    Property("sourceId", required=True): String(),
+                },
+                accept_only=["sourceId"],
+            )
+            | Object(
+                properties={
+                    Property("url", required=True): Url(),
+                    Property("metadataPrefix", required=True): String(),
+                    Property(
+                        "transferUrlFilters",
+                        required=True,
+                    ): Array(
+                        items=Object(
+                            properties={
+                                Property("regex", required=True): String(),
+                                Property("path"): String(),
+                            },
+                            accept_only=["regex", "path"],
+                        )
+                    ),
+                },
+                accept_only=[
+                    "url",
+                    "metadataPrefix",
+                    "transferUrlFilters",
+                ],
+            ),
+        }
+        | ConfigurationMetadataCreated
+        | ConfigurationMetadataModified,
+        accept_only=[
+            "id",
+            "status",
+            "workspaceId",
+            "name",
+            "description",
+            "type",
+            "additionalInformation",
+        ]
+        + (["userCreated", "datetimeCreated"] if accept_creation_md else [])
+        + (
+            ["userModified", "datetimeModified"]
+            if accept_modification_md
+            else []
+        ),
+    ).assemble()

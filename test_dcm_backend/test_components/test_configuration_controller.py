@@ -17,7 +17,6 @@ def _config():
         "id": str(uuid1()),
         "active": True,
         "scheduling": None,
-        "job": {"from": "import_ies", "args": {}}
     }
 
 

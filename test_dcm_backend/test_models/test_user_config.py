@@ -2,24 +2,57 @@
 
 from dcm_common.models.data_model import get_model_serialization_test
 
-from dcm_backend.models.user_config import UserConfig, UserCredentials
+from dcm_backend.models.user_config import (
+    UserConfig,
+    UserSecrets,
+    UserCredentials,
+    GroupMembership
+)
+
+
+test_group_membership_json = get_model_serialization_test(
+    GroupMembership,
+    (
+        ((), {"id_": "group0"}),
+        ((), {"id_": "group0", "workspace": "workspace01"}),
+    ),
+)
 
 
 test_user_config_json = get_model_serialization_test(
     UserConfig,
     (
-        ((), {"user_id": "a"}),
+        ((), {"username": "a"}),
         (
             (),
             {
-                "user_id": "a",
+                "id_": "a",
                 "external_id": "b",
+                "username": "a",
+                "status": "ok",
                 "firstname": "c",
                 "lastname": "d",
-                "roles": ["role1", "role2"],
+                "groups": [
+                    GroupMembership("group1"),
+                    GroupMembership("group2", "workspace01"),
+                ],
+                "widget_config": {"widget0": {"arg0": 0, "arg1": "a"}},
+                "user_created": "a",
+                "datetime_created": "0",
+                "user_modified": "b",
+                "datetime_modified": "1",
             },
         ),
     ),
+)
+
+
+test_user_secrets_json = get_model_serialization_test(
+    UserSecrets,
+    (
+        ((), {"password": "c"}),
+        ((), {"id_": "a", "user_id": "b", "password": "c"}),
+    )
 )
 
 
@@ -31,49 +64,23 @@ test_user_credentials_json = get_model_serialization_test(
 )
 
 
-def test_user_config_password_default():
-    """
-    Test default behavior of `UserConfig` regarding (de-)serialization
-    of the password-attribute.
-    """
-
-    # is (by-default) not serialized
-    config = UserConfig(user_id="a", _password="b", _active=False)
-    assert config.json == {"userId": "a", "roles": []}
-
-    # is (by-default) deserialized
-    # special case where the secret properties like _password should be
-    # tested explicitly despite them being internal attributes
-    assert (
-        # pylint: disable=protected-access
-        UserConfig.from_json(config.json | {"password": "b"})._password
-        == "b"
-    )
-    assert (
-        # pylint: disable=protected-access
-        not UserConfig.from_json(config.json | {"active": False})._active
-    )
-
-    # does not have getter methods
-    assert not hasattr(config, "password")
-    assert not hasattr(config, "active")
-
-
-def test_user_config_with_secret():
-    """
-    Test non-default behavior of `UserConfig` regarding
-    (de-)serialization of secret attributes.
-    """
-
-    # is serialized
-    config = UserConfig(user_id="a", _password="b", _active=False)
-    assert config.with_secret.json == {
-        "userId": "a",
-        "password": "b",
-        "active": False,
-        "roles": []
-    }
-
-    # does have getter methods
-    assert not config.with_secret.active
-    assert config.with_secret.password == "b"
+def test_user_config_row_from_row():
+    """Test database-serialization."""
+    row = UserConfig(
+        id_="a",
+        external_id="b",
+        username="a",
+        status="ok",
+        firstname="c",
+        lastname="d",
+        groups=[
+            GroupMembership("group1"),
+            GroupMembership("group2", "workspace01"),
+        ],
+        widget_config={"widget0": {"arg0": 0, "arg1": "a"}},
+        user_created="a",
+        datetime_created="0",
+        user_modified="b",
+        datetime_modified="1",
+    ).row
+    assert UserConfig.from_row(row).row == row

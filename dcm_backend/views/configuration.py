@@ -9,12 +9,21 @@ from uuid import uuid4
 from flask import Blueprint, jsonify, Response
 from argon2 import PasswordHasher
 from data_plumber_http.decorators import flask_handler, flask_args, flask_json
-from dcm_common.db import KeyValueStoreAdapter
+from dcm_common.db import SQLAdapter
 from dcm_common import services
 from dcm_common.services.views.interface import View
 
 from dcm_backend.config import AppConfig
-from dcm_backend.models import JobConfig, UserConfig
+from dcm_backend.models import (
+    JobConfig,
+    GroupMembership,
+    UserConfig,
+    UserSecrets,
+    UserConfigWithSecrets,
+    WorkspaceConfig,
+    TemplateConfig,
+    ImportSource,
+)
 from dcm_backend.components import Scheduler
 from dcm_backend import handlers
 
@@ -24,11 +33,12 @@ class ConfigurationView(View):
     View-class for managing configurations of
     * jobs
     * users
+    * workspaces
+    * templates
 
     Keyword arguments:
     config -- `AppConfig`-object
-    job_config_db -- adapter for job configuration-database
-    user_config_db -- adapter for user configuration-database
+    db -- database adapter
     scheduler -- `Scheduler`-object
     password_hasher -- instance of argon2.PasswordHasher
     """
@@ -38,14 +48,12 @@ class ConfigurationView(View):
     def __init__(
         self,
         config: AppConfig,
-        job_config_db: KeyValueStoreAdapter,
-        user_config_db: KeyValueStoreAdapter,
+        db: SQLAdapter,
         scheduler: Scheduler,
         password_hasher: PasswordHasher
     ) -> None:
         super().__init__(config)
-        self.job_config_db = job_config_db
-        self.user_config_db = user_config_db
+        self.db = db
         self.scheduler = scheduler
         self.password_hasher = password_hasher
 
@@ -59,14 +67,37 @@ class ConfigurationView(View):
         )
         def get_config(id_: str):
             """Fetch job config associated with given `id_`."""
-            config = self.job_config_db.read(id_)
-            if config:
-                return jsonify(config), 200
-            return Response(
-                f"Unknown config '{id_}'.", mimetype="text/plain", status=404
+            query = self.db.get_row("job_configs", id_).eval()
+
+            if query is None:
+                return Response(
+                    f"Unknown job config '{id_}'.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+
+            config = JobConfig.from_row(query)
+            # fetch associated workspace
+            config.workspace_id = self.db.get_row(
+                "templates", config.template_id
+            ).eval().get("workspace_id")
+            # set scheduledExec; get first hit in list of planned executions
+            config.scheduled_exec = next(
+                iter(
+                    sorted(
+                        map(
+                            lambda p: p.at,
+                            self.scheduler.get_plans(config.id_),
+                        )
+                    )
+                ),
+                None,
             )
+            # TODO: fetch associated jobs (reports)
+            return jsonify(config.json), 200
 
     def _post_job_config(self, bp: Blueprint):
+
         @bp.route(
             "/job/configure", methods=["POST"], provide_automatic_options=False
         )
@@ -75,18 +106,71 @@ class ConfigurationView(View):
             json=flask_args,
         )
         @flask_handler(  # process body
-            handler=handlers.job_config_post_handler,
+            handler=handlers.get_job_config_handler(
+                False, accept_creation_md=True
+            ),
             json=flask_json,
         )
         def post_config(config: JobConfig):
-            """Write job config. Set id and name if missing."""
-            if config.id_ is None:
-                config.id_ = self.job_config_db.push({})
-            if config.name is None:
-                config.name = f"Unnamed Config {config.id_[0:8]}"
-            self.job_config_db.write(config.id_, config.json)
-            self.scheduler.schedule(config)
-            return jsonify({"id": config.id_, "name": config.name}), 200
+            """Create new job config."""
+            if config.id_ is not None:
+                if (
+                    self.db.get_row(
+                        "job_configs", config.id_, cols=["id"]
+                    ).eval()
+                    is not None
+                ):
+                    return Response(
+                        f"Job '{config.id_}' does already exist.",
+                        mimetype="text/plain",
+                        status=409,
+                    )
+
+            # write given config
+            config.id_ = self.db.insert("job_configs", config.row).eval()
+            if config.status == "ok":
+                self.scheduler.schedule(config)
+            return jsonify({"id": config.id_}), 200
+
+    def _put_job_config(self, bp: Blueprint):
+
+        @bp.route(
+            "/job/configure",
+            methods=["PUT"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # process query
+            handler=services.no_args_handler,
+            json=flask_args,
+        )
+        @flask_handler(  # process body
+            handler=handlers.get_job_config_handler(
+                True, accept_modification_md=True
+            ),
+            json=flask_json,
+        )
+        def put_job_config(config: JobConfig):
+            """Update job config."""
+            # try to load from db
+            query = self.db.get_row(
+                "job_configs", config.id_, cols=["id"]
+            ).eval()
+            if query is None:
+                return Response(
+                    f"Job configuration '{config.id_}' does not exist.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+
+            # write given config
+            self.db.update("job_configs", config.row).eval()
+            # cancel any scheduled plans for this job config
+            self.scheduler.clear_jobs(config.id_)
+            # re-schedule if not draft
+            if config.status == "ok":
+                # TODO: pass previous execution
+                self.scheduler.schedule(config)
+            return Response("OK", mimetype="text/plain", status=200)
 
     def _list_job_configs(self, bp: Blueprint):
         @bp.route(
@@ -96,7 +180,10 @@ class ConfigurationView(View):
         )
         def list_configs():
             """List ids of available job configs."""
-            return jsonify(self.job_config_db.keys()), 200
+            return (
+                jsonify(self.db.get_column("job_configs", "id").eval()),
+                200,
+            )
 
     def _delete_job_config(self, bp: Blueprint):
         @bp.route(
@@ -110,8 +197,8 @@ class ConfigurationView(View):
         )
         def delete_config(id_: str):
             """Delete job config by `id_`."""
-            self.job_config_db.delete(id_)
-            self.scheduler.schedule(JobConfig({}, id_=id_))
+            self.db.delete("job_configs", id_).eval()
+            self.scheduler.clear_jobs(id_)
             return Response(
                 f"Deleted config '{id_}'.", mimetype="text/plain", status=200
             )
@@ -124,7 +211,10 @@ class ConfigurationView(View):
         )
         def list_users():
             """List ids of existing users."""
-            return jsonify(self.user_config_db.keys()), 200
+            return (
+                jsonify(self.db.get_column("user_configs", "id").eval()),
+                200,
+            )
 
     def _get_user_config(self, bp: Blueprint):
         @bp.route(
@@ -136,16 +226,33 @@ class ConfigurationView(View):
         )
         def get_user_config(id_: str):
             """Fetch user config associated with given `id_`."""
-            config = self.user_config_db.read(id_)
-            if config:
-                # this back and forth transformation is used to remove
-                # any secrets from the response
-                return jsonify(UserConfig.from_json(config).json), 200
-            return Response(
-                f"Unknown user '{id_}'.", mimetype="text/plain", status=404
+            query = self.db.get_row("user_configs", id_).eval()
+
+            if query is None:
+                return Response(
+                    f"Unknown user '{id_}'.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+
+            config = UserConfig.from_row(query)
+            config.groups.extend(
+                map(
+                    lambda x: GroupMembership(
+                        x["group_id"], x["workspace_id"]
+                    ),
+                    self.db.get_rows(
+                        "user_groups",
+                        id_,
+                        "user_id",
+                        ["group_id", "workspace_id"],
+                    ).eval(),
+                )
             )
+            return jsonify(config.json), 200
 
     def _put_user_config(self, bp: Blueprint):
+
         @bp.route(
             "/user/configure",
             methods=["PUT"],
@@ -156,51 +263,80 @@ class ConfigurationView(View):
             json=flask_args,
         )
         @flask_handler(  # process body
-            handler=handlers.user_config_post_handler,
+            handler=handlers.get_user_config_handler(
+                True, accept_modification_md=True
+            ),
             json=flask_json,
         )
         def put_user_config(config: UserConfig):
             """Update user config."""
             # try to load from db
-            _existing_config = self.user_config_db.read(config.user_id)
-            if _existing_config is None:
+            query = self.db.get_row(
+                "user_configs", config.id_, cols=["id"]
+            ).eval()
+            if query is None:
                 return Response(
-                    f"User '{config.user_id}' does not exist.", 404
+                    f"User '{config.id_}' does not exist.",
+                    mimetype="text/plain",
+                    status=404,
                 )
-            existing_config = UserConfig.from_json(_existing_config)
 
-            # write given config hydrated with existing data (like password)
-            self.user_config_db.write(
-                config.user_id,
-                UserConfig.from_json(
-                    existing_config.with_secret.json | config.json
-                ).with_secret.json,
-            )
+            # validate workspaces for group memberships
+            existing_workspaces = self.db.get_column("workspaces", "id").eval()
+            for group in config.groups:
+                if group.workspace is not None and (
+                    group.workspace not in existing_workspaces
+                ):
+                    return Response(
+                        (
+                            f"Cannot modify user '{config.id_}'. "
+                            + f"Workspace '{group.workspace}' does not exist."
+                        ),
+                        mimetype="text/plain",
+                        status=400,
+                    )
+
+            # write given config
+            with self.db.new_transaction() as t:
+                t.add_update("user_configs", config.row)
+                # replace user groups
+                t.add_delete("user_groups", config.id_, "user_id")
+                for group in config.groups:
+                    t.add_insert(
+                        "user_groups",
+                        {
+                            "id": str(uuid4()),
+                            "group_id": group.id_,
+                            "user_id": config.id_,
+                            "workspace_id": group.workspace,
+                        },
+                    )
+            t.result.eval("updating user")
+
             return Response("OK", mimetype="text/plain", status=200)
 
     def create_user(
         self,
-        user_id: Optional[str] = None,
+        username: Optional[str] = None,
         config: Optional[UserConfig] = None,
         password: Optional[str] = None,
-    ) -> UserConfig:
+    ) -> UserConfigWithSecrets:
         """
-        Returns a `UserConfig` based on the given input. Requires either
-        `user_id` or `config`. If `config` is given, changes are made in
-        place. Sets the 'active'-flag: if `password` is given or
-        `not AppConfig.REQUIRE_USER_ACTIVATION`, the user is set to
-        active.
+        Returns a `UserConfigWithSecrets` based on the given input.
+        Requires either `username` or `config`. If `config` is given,
+        changes are made in place. Sets `status` to 'ok' if `password`
+        is given or `not AppConfig.REQUIRE_USER_ACTIVATION`.
         """
         # check requirements
-        if user_id is not None and config is not None:
+        if username is not None and config is not None:
             raise ValueError(
-                "'ConfigurationView.create_user' accepts only 'user_id' OR "
+                "'ConfigurationView.create_user' accepts only 'username' OR "
                 + "'config'."
             )
-        if user_id is None and config is None:
+        if username is None and config is None:
             raise ValueError(
-                "'ConfigurationView.create_user' requires either 'user_id' or "
-                + "'config'."
+                "'ConfigurationView.create_user' requires either 'username' or"
+                + " 'config'."
             )
 
         # generate password if needed
@@ -209,16 +345,18 @@ class ConfigurationView(View):
         else:
             _password = password
 
-        # create config object if needed
-        if config is None:
-            config = UserConfig(user_id=user_id)
+        user = UserConfigWithSecrets(
+            UserConfig(username=username) if config is None else config,
+            UserSecrets(user_id=config.id_, password=_password)
+        )
 
         # update config
-        config.set_active(password is not None)
-        config.set_password(self.password_hasher.hash(
-            md5(_password.encode(encoding="utf-8")).hexdigest()
-        ))
-        if not config.with_secret.active:
+        if password is not None or not self.config.REQUIRE_USER_ACTIVATION:
+            user.config.status = "ok"
+        else:
+            user.config.status = "inactive"
+
+        if password is None:
             # TODO, send email..
             print(
                 "Set initial password at: "
@@ -226,10 +364,14 @@ class ConfigurationView(View):
                     password=_password
                 )
             )
+        user.secrets.password = self.password_hasher.hash(
+            md5(_password.encode(encoding="utf-8")).hexdigest()
+        )
 
-        return config
+        return user
 
     def _post_user_config(self, bp: Blueprint):
+
         @bp.route(
             "/user/configure",
             methods=["POST"],
@@ -240,28 +382,73 @@ class ConfigurationView(View):
             json=flask_args,
         )
         @flask_handler(  # process body
-            handler=handlers.user_config_post_handler,
+            handler=handlers.get_user_config_handler(
+                False, accept_creation_md=True
+            ),
             json=flask_json,
         )
         def post_user_config(config: UserConfig):
             """Create new user config."""
-            # check db for existing record
-            if config.user_id in self.user_config_db.keys():
+            # check for conflicts
+            if (  # id
+                config.id_ is not None
+                and self.db.get_row(
+                    "user_configs", config.id_, cols=["id"]
+                ).eval()
+                is not None
+            ) or len(  # username
+                self.db.get_rows(
+                    "user_configs", config.username, "username", cols=["id"]
+                ).eval()
+            ) != 0:
                 return Response(
-                    f"User '{config.user_id}' does already exist.",
+                    f"User '{config.id_}' does already exist.",
                     mimetype="text/plain",
                     status=409,
                 )
 
-            # create user
-            self.create_user(config=config)
+            # validate workspaces for group memberships
+            existing_workspaces = self.db.get_column("workspaces", "id").eval()
+            for group in config.groups:
+                if group.workspace is not None and (
+                    group.workspace not in existing_workspaces
+                ):
+                    return Response(
+                        (
+                            "Cannot add user with username "
+                            + f"'{config.username}'. "
+                            + f"Workspace '{group.workspace}' does not exist."
+                        ),
+                        mimetype="text/plain",
+                        status=400,
+                    )
 
-            # write to db
-            self.user_config_db.write(
-                config.user_id,
-                config.with_secret.json,
-            )
-            return Response("OK", mimetype="text/plain", status=200)
+            # create user
+            user = self.create_user(config=config)
+
+            # insert in database
+            with self.db.new_transaction() as t:
+                user.config.id_ = str(uuid4())
+                user.secrets.id_ = str(uuid4())
+                t.add_insert("user_configs", user.config.row)
+                t.add_insert(
+                    "user_secrets",
+                    user.secrets.row | {"user_id": user.config.id_},
+                )
+                # create user groups
+                for group in user.config.groups:
+                    t.add_insert(
+                        "user_groups",
+                        {
+                            "id": str(uuid4()),
+                            "group_id": group.id_,
+                            "user_id": user.config.id_,
+                            "workspace_id": group.workspace,
+                        },
+                    )
+            t.result.eval("creating user")
+
+            return (jsonify({"id": user.config.id_}), 200)
 
     def _delete_user_config(self, bp: Blueprint):
         @bp.route(
@@ -275,14 +462,335 @@ class ConfigurationView(View):
         )
         def delete_user_config(id_: str):
             """Delete user config by `id_`."""
-            self.user_config_db.delete(id_)
+            with self.db.new_transaction() as t:
+                # delete user groups
+                t.add_delete("user_groups", id_, "user_id")
+                # delete user secrets
+                t.add_delete("user_secrets", id_, "user_id")
+                # delete user
+                t.add_delete("user_configs", id_)
+            t.result.eval("deleting user")
+
             return Response(
-                f"Deleted user '{id_}'.", mimetype="text/plain", status=200
+                f"Deleted user '{id_}'.",
+                mimetype="text/plain",
+                status=200
+            )
+
+    def _list_workspaces(self, bp: Blueprint):
+        @bp.route(
+            "/workspace/configure",
+            methods=["OPTIONS"],
+            provide_automatic_options=False
+        )
+        def list_workspaces():
+            """List ids of existing workspaces."""
+            return jsonify(self.db.get_column("workspaces", "id").eval()), 200
+
+    def _get_workspace_config(self, bp: Blueprint):
+        @bp.route(
+            "/workspace/configure",
+            methods=["GET"],
+            provide_automatic_options=False
+        )
+        @flask_handler(  # process query
+            handler=handlers.get_config_id_handler(True),
+            json=flask_args,
+        )
+        def get_workspace_config(id_: str):
+            """Fetch workspace config associated with given `id_`."""
+            query = self.db.get_row("workspaces", id_).eval()
+
+            if query is None:
+                return Response(
+                    f"Unknown workspace '{id_}'.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+
+            config = WorkspaceConfig.from_row(query)
+            # FIXME: these should be a single transaction
+            config.users.extend(
+                map(
+                    lambda x: x["user_id"],
+                    self.db.get_rows(
+                        "user_groups",
+                        id_,
+                        "workspace_id",
+                        ["user_id"],
+                    ).eval(),
+                )
+            )
+            config.templates.extend(
+                map(
+                    lambda x: x["id"],
+                    self.db.get_rows(
+                        "templates", id_, "workspace_id", ["id"]
+                    ).eval(),
+                )
+            )
+            return jsonify(config.json), 200
+
+    def _put_workspace_config(self, bp: Blueprint):
+
+        @bp.route(
+            "/workspace/configure",
+            methods=["PUT"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # process query
+            handler=services.no_args_handler,
+            json=flask_args,
+        )
+        @flask_handler(  # process body
+            handler=handlers.get_workspace_config_handler(
+                True, accept_modification_md=True
+            ),
+            json=flask_json,
+        )
+        def put_workspace_config(config: WorkspaceConfig):
+            """Update workspace config."""
+            # try to load from db
+            query = self.db.get_row(
+                "workspaces", config.id_, cols=["id"]
+            ).eval()
+            if query is None:
+                return Response(
+                    f"Workspace '{config.id_}' does not exist.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+
+            # write given config
+            self.db.update("workspaces", config.row).eval()
+            return Response("OK", mimetype="text/plain", status=200)
+
+    def _post_workspace_config(self, bp: Blueprint):
+
+        @bp.route(
+            "/workspace/configure",
+            methods=["POST"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # process query
+            handler=services.no_args_handler,
+            json=flask_args,
+        )
+        @flask_handler(  # process body
+            handler=handlers.get_workspace_config_handler(
+                False, accept_creation_md=True
+            ),
+            json=flask_json,
+        )
+        def post_workspace_config(config: WorkspaceConfig):
+            """Create new workspace config."""
+            # check for conflicts
+            if config.id_ is not None:
+                if (
+                    self.db.get_row(
+                        "workspaces", config.id_, cols=["id"]
+                    ).eval()
+                    is not None
+                ):
+                    return Response(
+                        f"Workspace '{config.id_}' does already exist.",
+                        mimetype="text/plain",
+                        status=409,
+                    )
+            return (
+                jsonify(
+                    {"id": self.db.insert("workspaces", config.row).eval()}
+                ),
+                200,
+            )
+
+    def _delete_workspace_config(self, bp: Blueprint):
+        @bp.route(
+            "/workspace/configure",
+            methods=["DELETE"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # process query
+            handler=handlers.get_config_id_handler(True),
+            json=flask_args,
+        )
+        def delete_workspace_config(id_: str):
+            """Delete workspace config by `id_`."""
+            if (
+                len(
+                    self.db.get_rows(
+                        "user_groups", id_, "workspace_id", cols=["id"]
+                    ).eval()
+                )
+                > 0
+            ):
+                return Response(
+                    f"Cannot delete '{id_}' as there are still users "
+                    + "associated with that workspace.",
+                    mimetype="text/plain",
+                    status=403,
+                )
+            if (
+                len(
+                    self.db.get_rows(
+                        "templates", id_, "workspace_id", cols=["id"]
+                    ).eval()
+                )
+                > 0
+            ):
+                return Response(
+                    f"Cannot delete '{id_}' as there are still templates "
+                    + "associated with that workspace.",
+                    mimetype="text/plain",
+                    status=403,
+                )
+            self.db.delete("workspaces", id_).eval()
+            return Response(
+                f"Deleted workspace '{id_}'.",
+                mimetype="text/plain",
+                status=200
+            )
+
+    def _list_templates(self, bp: Blueprint):
+        @bp.route(
+            "/template/configure",
+            methods=["OPTIONS"],
+            provide_automatic_options=False
+        )
+        def list_templates():
+            """List ids of existing templates."""
+            return jsonify(self.db.get_column("templates", "id").eval()), 200
+
+    def _get_template_config(self, bp: Blueprint):
+        @bp.route(
+            "/template/configure",
+            methods=["GET"],
+            provide_automatic_options=False
+        )
+        @flask_handler(  # process query
+            handler=handlers.get_config_id_handler(True),
+            json=flask_args,
+        )
+        def get_template_config(id_: str):
+            """Fetch template config associated with given `id_`."""
+            query = self.db.get_row("templates", id_).eval()
+
+            if query is None:
+                return Response(
+                    f"Unknown template '{id_}'.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+
+            config = TemplateConfig.from_row(query)
+            # TODO: fetch associated job-configurations
+            return jsonify(config.json), 200
+
+    def _put_template_config(self, bp: Blueprint):
+
+        @bp.route(
+            "/template/configure",
+            methods=["PUT"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # process query
+            handler=services.no_args_handler,
+            json=flask_args,
+        )
+        @flask_handler(  # process body
+            handler=handlers.get_template_config_handler(
+                True, accept_modification_md=True
+            ),
+            json=flask_json,
+        )
+        def put_template_config(config: TemplateConfig):
+            """Update template config."""
+            # try to load from db
+            query = self.db.get_row(
+                "templates", config.id_, cols=["id"]
+            ).eval()
+            if query is None:
+                return Response(
+                    f"Template '{config.id_}' does not exist.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+
+            # write given config
+            self.db.update("templates", config.row).eval()
+            return Response("OK", mimetype="text/plain", status=200)
+
+    def _post_template_config(self, bp: Blueprint):
+
+        @bp.route(
+            "/template/configure",
+            methods=["POST"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # process query
+            handler=services.no_args_handler,
+            json=flask_args,
+        )
+        @flask_handler(  # process body
+            handler=handlers.get_template_config_handler(
+                False, accept_creation_md=True
+            ),
+            json=flask_json,
+        )
+        def post_template_config(config: TemplateConfig):
+            """Create new template config."""
+            # check for conflicts
+            if config.id_ is not None:
+                if (
+                    self.db.get_row(
+                        "templates", config.id_, cols=["id"]
+                    ).eval()
+                    is not None
+                ):
+                    return Response(
+                        f"Template '{config.id_}' does already exist.",
+                        mimetype="text/plain",
+                        status=409,
+                    )
+            return (
+                jsonify(
+                    {"id": self.db.insert("templates", config.row).eval()}
+                ),
+                200,
+            )
+
+    def _delete_template_config(self, bp: Blueprint):
+        @bp.route(
+            "/template/configure",
+            methods=["DELETE"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # process query
+            handler=handlers.get_config_id_handler(True),
+            json=flask_args,
+        )
+        def delete_template_config(id_: str):
+            """Delete template config by `id_`."""
+            self.db.delete("templates", id_).eval()
+            return Response(
+                f"Deleted template '{id_}'.",
+                mimetype="text/plain",
+                status=200
+            )
+
+    def _hotfolder_sources(self, bp: Blueprint):
+        @bp.route("/template/hotfolder-sources", methods=["GET"])
+        def hotfolder_sources():
+            query = self.db.get_rows("hotfolder_import_sources").eval()
+            return (
+                jsonify([ImportSource.from_row(i).json for i in query]),
+                200,
             )
 
     def configure_bp(self, bp: Blueprint, *args, **kwargs) -> None:
         self._get_job_config(bp)
         self._post_job_config(bp)
+        self._put_job_config(bp)
         self._list_job_configs(bp)
         self._delete_job_config(bp)
         self._list_users(bp)
@@ -290,3 +798,14 @@ class ConfigurationView(View):
         self._put_user_config(bp)
         self._post_user_config(bp)
         self._delete_user_config(bp)
+        self._list_workspaces(bp)
+        self._get_workspace_config(bp)
+        self._put_workspace_config(bp)
+        self._post_workspace_config(bp)
+        self._delete_workspace_config(bp)
+        self._list_templates(bp)
+        self._get_template_config(bp)
+        self._put_template_config(bp)
+        self._post_template_config(bp)
+        self._delete_template_config(bp)
+        self._hotfolder_sources(bp)

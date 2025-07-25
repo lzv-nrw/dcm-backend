@@ -7,9 +7,9 @@ import re
 
 from argon2 import PasswordHasher
 import pytest
-from dcm_common.db import NativeKeyValueStoreAdapter, MemoryStore
 
-from dcm_backend import app_factory
+from dcm_backend.models import UserConfig
+from dcm_backend import app_factory, util
 
 
 class StdOutReader:
@@ -29,39 +29,33 @@ class StdOutReader:
 
 @pytest.fixture(name="user0_credentials")
 def _user0_password():
-    return {"userId": "user0", "password": md5(b"password").hexdigest()}
-
-
-@pytest.fixture(name="minimal_user_config")
-def _minimal_user_config(user0_credentials):
     return {
-        "userId": user0_credentials["userId"],
-        "password": PasswordHasher().hash(user0_credentials["password"]),
+        "username": "admin",
+        "password": md5(
+            util.DemoData.admin_password.encode(encoding="utf-8")
+        ).hexdigest(),
     }
 
 
 @pytest.fixture(name="client_and_db")
-def _client_and_dbs(testing_config, minimal_user_config):
+def _client_and_dbs(testing_config):
     class TestingConfigWithoutUserActivation(testing_config):
         REQUIRE_USER_ACTIVATION = False
 
-    config_db = NativeKeyValueStoreAdapter(MemoryStore())
-    config_db.write(minimal_user_config["userId"], minimal_user_config)
-    return (
-        app_factory(
-            TestingConfigWithoutUserActivation(), user_config_db=config_db
-        ).test_client(),
-        config_db,
-    )
+    config = TestingConfigWithoutUserActivation()
+    return app_factory(config, block=True).test_client(), config.db
 
 
 def test_login(client_and_db, user0_credentials):
     """Test endpoint `POST-/user` of user-API."""
-    client, _ = client_and_db
+    client, db = client_and_db
     response = client.post("/user", json=user0_credentials)
 
     assert response.status_code == 200
-    assert response.mimetype == "text/plain"
+    assert response.mimetype == "application/json"
+    assert response.json == UserConfig.from_row(
+        db.get_row("user_configs", util.DemoData.user0).eval()
+    ).json | {"groups": [{"id": "admin"}]}
 
 
 def test_login_rehash(client_and_db, user0_credentials):
@@ -72,14 +66,18 @@ def test_login_rehash(client_and_db, user0_credentials):
     assert client.post("/user", json=user0_credentials).status_code == 200
 
     # replace existing hash in db by one with different settings
-    existing_config = db.read(user0_credentials["userId"])
-    db.write(
-        user0_credentials["userId"],
-        existing_config
-        | {
+    config = db.get_rows(
+        "user_configs", user0_credentials["username"], "username", ["id"]
+    ).eval()[0]
+    secrets = db.get_rows("user_secrets", config["id"], "user_id").eval()[0]
+    db.update(
+        "user_secrets",
+        {
+            "id": secrets["id"],
+            "user_id": config["id"],
             "password": PasswordHasher(time_cost=1).hash(
                 user0_credentials["password"]
-            )
+            ),
         },
     )
 
@@ -87,14 +85,14 @@ def test_login_rehash(client_and_db, user0_credentials):
     assert client.post("/user", json=user0_credentials).status_code == 200
 
     # check for re-hash
-    existing_config2 = db.read(user0_credentials["userId"])
-    assert existing_config["password"] != existing_config2["password"]
+    secrets2 = db.get_rows("user_secrets", config["id"], "user_id").eval()[0]
+    assert secrets["password"] != secrets2["password"]
 
 
 @pytest.mark.parametrize(
     "credentials",
     [
-        {"userId": "user1"},
+        {"username": "not-admin"},
         {"password": "not-password"},
     ],
     ids=["bad-user", "bad-password"],
@@ -118,7 +116,7 @@ def test_new_user_then_login(client_and_db):
     assert (
         client.post(
             "/user",
-            json={"userId": "user1", "password": md5(b"user1").hexdigest()},
+            json={"username": "newuser", "password": md5(b"a").hexdigest()},
         ).status_code
         == 401
     )
@@ -126,7 +124,10 @@ def test_new_user_then_login(client_and_db):
     # create new user (and capture stdout for initial password)
     with StdOutReader() as output:
         assert (
-            client.post("/user/configure", json={"userId": "user1"}).status_code
+            client.post(
+                "/user/configure",
+                json={"username": "newuser", "email": "a@b.c"},
+            ).status_code
             == 200
         )
     password = re.findall(r"\(password=(.*)\)", output.lines[0])[0]
@@ -136,7 +137,7 @@ def test_new_user_then_login(client_and_db):
         client.post(
             "/user",
             json={
-                "userId": "user1",
+                "username": "newuser",
                 "password": md5(password.encode(encoding="utf-8")).hexdigest(),
             },
         ).status_code
@@ -168,23 +169,22 @@ def test_user_change_password(client_and_db, user0_credentials):
     assert client.post("/user", json=new_credentials).status_code == 200
 
 
-def test_user_creation_and_login_with_user_activation(testing_config):
+def test_new_user_and_login_with_user_activation(testing_config):
     """
     Test creation of new users with user account activation requirement.
     """
     class TestingConfigWithUserActivation(testing_config):
         REQUIRE_USER_ACTIVATION = True
 
-    config_db = NativeKeyValueStoreAdapter(MemoryStore())
-    client = app_factory(
-        TestingConfigWithUserActivation(), user_config_db=config_db
-    ).test_client()
+    config = TestingConfigWithUserActivation()
+    client = app_factory(config, block=True).test_client()
 
     # create new user (and capture stdout for initial password)
     with StdOutReader() as output:
         assert (
             client.post(
-                "/user/configure", json={"userId": "user1"}
+                "/user/configure",
+                json={"username": "newuser", "email": "a@b.c"},
             ).status_code
             == 200
         )
@@ -195,7 +195,7 @@ def test_user_creation_and_login_with_user_activation(testing_config):
         client.post(
             "/user",
             json={
-                "userId": "user1",
+                "username": "newuser",
                 "password": md5(password.encode(encoding="utf-8")).hexdigest(),
             },
         ).status_code
@@ -208,7 +208,7 @@ def test_user_creation_and_login_with_user_activation(testing_config):
         client.put(
             "/user/password",
             json={
-                "userId": "user1",
+                "username": "newuser",
                 "password": md5(password.encode(encoding="utf-8")).hexdigest(),
                 "newPassword": new_password,
             },
@@ -218,7 +218,7 @@ def test_user_creation_and_login_with_user_activation(testing_config):
     # attempt login again
     assert (
         client.post(
-            "/user", json={"userId": "user1", "password": new_password}
+            "/user", json={"username": "newuser", "password": new_password}
         ).status_code
         == 200
     )

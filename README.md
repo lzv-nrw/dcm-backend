@@ -3,10 +3,9 @@
 The 'DCM Backend'-API provides functionality to
 * trigger an ingest in the archive-system,
 * collect the current ingest-status,
-* manage job configurations,
-* control job execution,
-* authenticate local users, and
-* manage user configurations.
+* manage job/user/workspace/template configurations,
+* control job execution, and
+* authenticate local users.
 
 This repository contains the corresponding Flask app definition.
 For the associated OpenAPI-document, please refer to the sibling package [`dcm-backend-api`](https://github.com/lzv-nrw/dcm-backend-api).
@@ -46,11 +45,9 @@ Using a virtual environment is recommended.
      -H 'Content-Type: application/json' \
      -d '{
      "ingest": {
-       "archive_identifier": "rosetta",
-       "rosetta": {
-         "subdir": "2468edf8-6706-4ff0-bd03-04512d082c28",
-         "producer": "12345678",
-         "material_flow": "12345678"
+       "archiveId": "40be1c3a-2a6a-4656-9996-078fc9364ac4",
+       "target": {
+         "subdirectory": "2468edf8-6706-4ff0-bd03-04512d082c28"
        }
      }
    }'
@@ -84,28 +81,27 @@ pytest -v -s
 Service-specific environment variables are
 
 ### Database
-* `JOB_CONFIGURATION_DATABASE_ADAPTER` [DEFAULT "native"]: which adapter-type to use for the job configuration database
-* `JOB_CONFIGURATION_DATABASE_SETTINGS` [DEFAULT {"backend": "memory"}]: JSON object containing the relevant information for initializing the job configuration database adapter
-* `REPORT_DATABASE_ADAPTER` [DEFAULT "native"]: which adapter-type to use for the job report database
-* `REPORT_DATABASE_SETTINGS` [DEFAULT {"backend": "memory"}]: JSON object containing the relevant information for initializing the job report database adapter
-* `USER_CONFIGURATION_DATABASE_ADAPTER` [DEFAULT "native"]: which adapter-type to use for the user configuration database
-* `USER_CONFIGURATION_DATABASE_SETTINGS` [DEFAULT {"backend": "memory"}]: JSON object containing the relevant information for initializing the user configuration database adapter
+* `DB_LOAD_SCHEMA` [DEFAULT 0]: whether the database should be initialized with the database schema
+* `DB_GENERATE_DEMO` [DEFAULT 0]: whether database-tables and related configuration should be filled with demo-data at startup (also includes `DB_GENERATE_DEMO_USERS`)
+* `DB_GENERATE_DEMO_USERS` [DEFAULT 0]: whether demo users are created at startup
+
+  Three regular users are created. User 'einstein' with password 'relativity', user 'curie' with password 'radioactivity',
+  and user 'feynman' with password 'superfluidity'.
+  Furthermore, an administrator called 'admin' is created, the corresponding password is printed to stdout on app-startup (see also `DB_DEMO_ADMIN_PW`).
+* `DB_DEMO_ADMIN_PW` [DEFAULT null] if set, the generated administrator-account gets assigned this password instead of a random one
 
 ### Users
-* `CREATE_DEMO_USERS` [DEFAULT 0]: whether demo users are created at startup
 * `REQUIRE_USER_ACTIVATION` [DEFAULT 1]: whether new users are required to set password before login
 * `USER_ACTIVATION_URL_FMT` [DEFAULT "ERROR: ..."]: python format-string containing `..{password}..` as key; used to format user-activation urls
-
-  Two demo users are created. User 'Einstein' with password 'relativity' and user 'Curie' with password 'radioactivity'.
 
 ### Scheduling
 * `SCHEDULING_CONTROLS_API` [DEFAULT 0] whether the scheduling-api is available
 * `SCHEDULING_AT_STARTUP` [DEFAULT 1] whether job scheduling-loop is active at startup
-* `SCHEDULING_INTERVAL` [DEFAULT 1.0] loop interval in seconds
+* `SCHEDULING_TIMEZONE` [DEFAULT null] timezone used during scheduling; if null, uses the system default (use python3's `import zoneinfo; zoneinfo.available_timezones()` to view all available options)
 
 ### Job Execution (Job Controller)
 * `JOB_PROCESSOR_TIMEOUT` [DEFAULT 30] service timeout duration in seconds
-* `JOB_PROCESSOR_HOST` [DEFAULT http://localhost:8086] Job Processor host address
+* `JOB_PROCESSOR_HOST` [DEFAULT http://localhost:8087] Job Processor host address
 * `JOB_PROCESSOR_POLL_INTERVAL` [DEFAULT 1.0] Job Processor polling interval
 
 ### Ingest (Archive Controller)
@@ -116,8 +112,9 @@ Service-specific environment variables are
 * `ARCHIVE_API_PROXY` [DEFAULT null]: JSON object containing a mapping of protocol name and corresponding proxy-address
 
 Additionally this service provides environment options for
-* `BaseConfig` and
-* `OrchestratedAppConfig`
+* `BaseConfig`,
+* `OrchestratedAppConfig`, and
+* `DBConfig`
 
 as listed [here](https://github.com/lzv-nrw/dcm-common#app-configuration).
 

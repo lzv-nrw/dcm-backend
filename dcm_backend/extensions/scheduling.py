@@ -1,45 +1,25 @@
 """Scheduling startup-extension."""
 
-import atexit
+import signal
 
-from dcm_common.daemon import FDaemon
-from dcm_common.services.extensions.common import startup_flask_run
+from dcm_common.services.extensions.common import (
+    add_signal_handler,
+    ExtensionLoaderResult,
+)
 
 
-def scheduling(app, config, scheduler, as_process) -> FDaemon:
+def scheduling_loader(scheduler) -> ExtensionLoaderResult:
     """
     Register the `scheduling` extension.
 
-    If `as_process`, the daemon-startup call is attached to the method
-    `app.run` (such that it is automatically executed if the `app` is
-    used by running in a separate process via `app.run`). Otherwise, the
-    daemon is executed directly, i.e., in the same process from which
-    this process has been called.
+    Only required for a clean shutdown.
     """
-    daemon = FDaemon(
-        scheduler.as_thread, kwargs={
-            "interval": config.SCHEDULING_INTERVAL
-        }
-    )
-    if config.SCHEDULING_AT_STARTUP:
-        if as_process:
-            # app in separate process via app.run
-            startup_flask_run(
-                app, (
-                    lambda: daemon.run(config.SCHEDULING_DAEMON_INTERVAL),
-                )
-            )
-        else:
-            # app native execution
-            daemon.run(config.SCHEDULING_DAEMON_INTERVAL)
-
     # perform clean shutdown on exit
-    atexit.register(
-        lambda block: (
-            daemon.stop(block=block),
-            scheduler.stop(),
-        ),
-        block=True
-    )
+    def _exit():
+        """Clear all scheduled jobs."""
+        scheduler.clear()
 
-    return daemon
+    add_signal_handler(signal.SIGINT, _exit)
+    add_signal_handler(signal.SIGTERM, _exit)
+
+    return ExtensionLoaderResult().toggle()

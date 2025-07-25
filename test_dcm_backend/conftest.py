@@ -1,19 +1,17 @@
 from typing import Optional
 from pathlib import Path
-from random import randint
+from random import choices
 import datetime
+import json
 
+from flask import Flask, jsonify, request
 import pytest
 from dcm_common.services.tests import (
     external_service, run_service, tmp_setup, tmp_cleanup, wait_for_report
 )
-from dcm_common.util import get_output_path
-from dcm_common.util import now
 
 from dcm_backend.config import AppConfig
 from dcm_backend import app_factory
-from dcm_backend.models import JobConfig, Schedule, Repeat, TimeUnit
-from dcm_backend.components import JobProcessorAdapter
 
 
 @pytest.fixture(scope="session", name="fixtures")
@@ -26,6 +24,18 @@ def _temp_folder():
     return Path("test_dcm_backend/temp_folder/")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def disable_extension_logging():
+    """
+    Disables the stderr-logging via the helper method `print_status`
+    of the `dcm_common.services.extensions`-subpackage.
+    """
+    # pylint: disable=import-outside-toplevel
+    from dcm_common.services.extensions.common import PrintStatusSettings
+
+    PrintStatusSettings.silent = True
+
+
 @pytest.fixture(name="testing_config")
 def _testing_config(fixtures):
     """Returns test-config"""
@@ -36,33 +46,31 @@ def _testing_config(fixtures):
         ROSETTA_AUTH_FILE = fixtures / ".rosetta/rosetta_auth"
         ARCHIVE_API_BASE_URL = "http://localhost:5050"
         TESTING = True
-        ORCHESTRATION_AT_STARTUP = False
         ORCHESTRATION_DAEMON_INTERVAL = 0.001
         ORCHESTRATION_ORCHESTRATOR_INTERVAL = 0.001
-        ORCHESTRATION_ABORT_NOTIFICATIONS_STARTUP_INTERVAL = 0.01
-        SCHEDULING_AT_STARTUP = False
-        SCHEDULING_INTERVAL = 0.001
         JOB_PROCESSOR_POLL_INTERVAL = 0.01
+        DB_LOAD_SCHEMA = True
+        DB_GENERATE_DEMO = True
+
+        ORCHESTRATION_AT_STARTUP = False
+        SCHEDULING_AT_STARTUP = False
+        DB_ADAPTER_STARTUP_IMMEDIATELY = True
+        ORCHESTRATION_ABORT_NOTIFICATIONS_STARTUP_INTERVAL = 0.01
+        DB_ADAPTER_STARTUP_INTERVAL = 0.01
+        DB_INIT_STARTUP_INTERVAL = 0.01
+        SCHEDULER_INIT_STARTUP_INTERVAL = 0.01
 
     return TestingConfig
 
 
-@pytest.fixture(name="test_subdir")
-def _test_subdir(temp_folder):
-    """Create a test-subdir and returns path relative to `temp_folder`."""
-    test_subdir = get_output_path(temp_folder)
-    (test_subdir / "payload.txt").touch()
-    return test_subdir.relative_to(temp_folder)
-
-
 @pytest.fixture(name="minimal_request_body")
-def _minimal_request_body(test_subdir):
+def _minimal_request_body():
     """Returns minimal request body filled with test-subdir path."""
     return {
         "ingest": {
-            "archive_identifier": "rosetta",
-            "rosetta": {
-                "subdir": str(test_subdir),
+            "archiveId": "0",
+            "target": {
+                "subdirectory": "/",
             }
         },
     }
@@ -73,8 +81,7 @@ def _client(testing_config):
     """
     Returns test_client.
     """
-
-    return app_factory(testing_config()).test_client()
+    return app_factory(testing_config(), block=True).test_client()
 
 
 @pytest.fixture(name="subdirectory")
@@ -92,105 +99,159 @@ def _material_flow():
     return "5678"
 
 
-@pytest.fixture(name="deposit_response")
-def _deposit_response(subdirectory, producer, material_flow):
-    def _(_deposit_id):
-        date_now = datetime.datetime.now()
-        return {
-            "subdirectory": subdirectory,
-            "id": _deposit_id,
-            "creation_date":
-                date_now.strftime("%d/%m/%Y %H:%M:%S"),
-            "submission_date":
-                (
-                    date_now + datetime.timedelta(seconds=10)
-                ).strftime("%d/%m/%Y %H:%M:%S"),
-            "update_date":
-                (
-                    date_now + datetime.timedelta(seconds=20)
-                ).strftime("%d/%m/%Y %H:%M:%S"),
-            "status": "INPROCESS",
-            "title": None,
-            "producer_agent": {
-                "value": "123456789",
-                "desc": "Description of the producer agent"
-            },
-            "producer": {
-                "value": producer,
-                "desc": "Description of the producer"
-            },
-            "material_flow": {
-                "value": material_flow,
-                "desc": "Description of the material flow"
-            },
-            "sip_id": "101010",
-            "sip_reason": "Files Rejected",
-            "link": "/rest/v0/deposits/" + str(_deposit_id)
-        }
-    return _
+@pytest.fixture(name="rosetta_stub")
+def _rosetta_stub():
+    """
+    Returns Rosetta-stub app.
+    """
+    def _app_factory(dir_: Optional[Path] = None):
+        _app = Flask(__name__)
 
-
-@pytest.fixture(name="run_rosetta_dummy")
-def _run_rosetta_dummy(run_service, deposit_response):
-    """ run dummy Rosetta instance """
-    def _(
-        post_response: Optional[dict | str] = None,
-        get_response: Optional[dict | str] = None,
-        post_error_code: Optional[int] = None,
-        get_error_code: Optional[int] = None,
-        request_id: Optional[str] = None
-    ):
-        """
-        Keyword arguments:
-        post_response -- response dict or string for a post request
-                         (default None leads to a response dict with random
-                         deposit id)
-        get_response -- response dict or string for a get request
-                        (default None leads to a response dict with random
-                        deposit id)
-        post_error_code -- error code for a post request
-                           (default None leads to status code 200)
-        get_error_code -- error code for a get request
-                          (default None leads to status code 200)
-        request_id -- the id to create the url for the 'get' method
-                      (default None leads to using response["id"] for the url)
-        """
-
-        if post_error_code is None:
-            post_error_code = 200
-        if get_error_code is None:
-            get_error_code = 200
-
-        _deposit_id = str(randint(1000, 9999))
-        if get_response is None:
-            get_response = deposit_response(_deposit_id)
-        if post_response is None:
-            post_response = deposit_response(_deposit_id)
-
-        # create id for 'get' url
-        if request_id:
-            _id = request_id
-        elif isinstance(get_response, dict) and "id" in get_response:
-            _id = get_response["id"]
+        deposit_dir = None
+        sip_dir = None
+        deposit_cache = None
+        sip_cache = None
+        mem = dir_ is None
+        if mem:
+            deposit_cache = {}
+            sip_cache = {}
         else:
-            _id = "0000"
+            deposit_dir = dir_ / "deposit"
+            sip_dir = dir_ / "sip"
 
-        run_service(
-            routes=[
-                (
-                    f"/rest/v0/deposits/{_id}",
-                    lambda: (get_response, get_error_code),
-                    ["GET"]
-                ),
-                (
-                    "/rest/v0/deposits",
-                    lambda: (post_response, post_error_code),
-                    ["POST"]
+        def create_deposit(subdirectory, producer, material_flow):
+            """
+            Returns deposit-object as dictionary and writes deposit+sip
+            to caches/files.
+            """
+            deposit_id = None
+            for _ in range(10):
+                __ = "".join(choices("0123456789", k=4))
+                if (dir_ is None and __ not in deposit_cache) or (
+                    dir_ is not None and not (dir_ / __).exists()
+                ):
+                    deposit_id = __
+                    break
+            if deposit_id is None:
+                return jsonify({}), 500
+            sip_id = f"SIP{deposit_id}"
+            date = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            deposit = {
+                "subdirectory": subdirectory,
+                "id": deposit_id,
+                "creation_date": date,
+                "submission_date": date,
+                "update_date": date,
+                "status": "INPROCESS",  # REJECTED, DECLINED, INPROCESS, FINISHED, DELETED, ERROR, IN_HUMAN_STAGE
+                "title": None,
+                "producer_agent": {
+                    "value": "1234",
+                    "desc": "Description of the producer agent"
+                },
+                "producer": {
+                    "value": producer,
+                    "desc": "Description of the producer"
+                },
+                "material_flow": {
+                    "value": material_flow,
+                    "desc": "Description of the material flow"
+                },
+                "sip_id": sip_id,
+                "sip_reason": None,
+                "link": "/rest/v0/deposits/" + deposit_id
+            }
+            sip = {
+                "link": "/rest/v0/sips/" + sip_id,
+                "id": f"SIP{deposit_id}",
+                "externalId": None,
+                "externalSystem": None,
+                "stage": "Deposit",  # Deposit, Loading, Validation, Assessor, Arranger, Approver, Bytestream, Enrichment, ToPermanent, Finished
+                "status": "INPROCESS",  # REJECTED, DECLINED, INPROCESS, FINISHED, DELETED, ERROR, IN_HUMAN_STAGE
+                "numberofIEs": "1",
+                "iePids": f"IE{deposit_id}",
+            }
+            if mem:
+                deposit_cache[deposit_id] = deposit
+                sip_cache[sip_id] = sip
+            else:
+                deposit_dir.mkdir(parents=True, exist_ok=True)
+                sip_dir.mkdir(parents=True, exist_ok=True)
+                (deposit_dir / deposit_id).write_text(
+                    json.dumps(deposit), encoding="utf-8"
                 )
-            ],
-            port=5050
-        )
-    return _
+                (sip_dir / sip_id).write_text(
+                    json.dumps(sip), encoding="utf-8"
+                )
+            return deposit
+
+        def get_deposit(deposit_id):
+            """
+            Returns deposit data from cache/disk or `None` if
+            unavailable.
+            """
+            result = None
+            if mem:
+                result = deposit_cache.get(deposit_id)
+            else:
+                if (deposit_dir / deposit_id).is_file():
+                    result = json.loads(
+                        (deposit_dir / deposit_id).read_text(encoding="utf-8")
+                    )
+            return result
+
+        def get_sip(sip_id):
+            """
+            Tries to load data from working dir and returns appropriate
+            response + status code.
+            """
+            result = None
+            if mem:
+                result = sip_cache.get(sip_id)
+            else:
+                if (sip_dir / sip_id).is_file():
+                    result = json.loads(
+                        (sip_dir / sip_id).read_text(encoding="utf-8")
+                    )
+            if result is None:
+                # for some reason requesting a non-existent SIP returns
+                # this object
+                return {
+                    "link": None,
+                    "id": None,
+                    "externalId": None,
+                    "externalSystem": None,
+                    "stage": None,
+                    "status": None,
+                    "numberofIEs": None,
+                    "iePids": None,
+                }
+            return result
+
+        @_app.route("/rest/v0/deposits/<id_>", methods=["GET"])
+        def deposits_get(id_: str):
+            data = get_deposit(id_)
+            if data is None:
+                return jsonify(None), 204
+            return jsonify(data), 200
+
+        @_app.route("/rest/v0/sips/<id_>", methods=["GET"])
+        def sips_get(id_: str):
+            data = get_sip(id_)
+            if data is None:
+                return jsonify(None), 204
+            return jsonify(data), 200
+
+        @_app.route("/rest/v0/deposits", methods=["POST"])
+        def deposits_post():
+            deposit = create_deposit(
+                request.json["subdirectory"],
+                request.json["producer"]["value"],
+                request.json["material_flow"]["value"]
+            )
+            return jsonify(deposit), 200
+
+        return _app
+    return _app_factory()
 
 
 @pytest.fixture(name="processor_port")
@@ -258,29 +319,6 @@ def _run_job_processor_dummy(run_service, processor_port):
             port=processor_port
         )
     return _
-
-
-@pytest.fixture(name="job_id")
-def _job_id():
-    return "0000"
-
-
-@pytest.fixture(name="job_config")
-def _job_config(job_id):
-    return JobConfig(
-        id_=job_id,
-        last_modified=now().isoformat(),
-        job={"process": {"from": "transfer", "args": {}}},
-        schedule=Schedule(
-            active=True,
-            repeat=Repeat(unit=TimeUnit.SECOND, interval=1)
-        )
-    )
-
-
-@pytest.fixture(name="job_processor_adapter")
-def _job_processor_adapter(processor_url):
-    return JobProcessorAdapter(processor_url)
 
 
 @pytest.fixture(name="jp_request_body")

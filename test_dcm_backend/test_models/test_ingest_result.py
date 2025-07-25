@@ -2,13 +2,29 @@
 
 from dcm_common.models.data_model import get_model_serialization_test
 
-from dcm_backend.models import IngestResult, Deposit
+from dcm_backend.models import IngestResult, RosettaResult
 
 
-test_ingestconfig_json = get_model_serialization_test(
-    IngestResult, (
+test_rosettaresult_json = get_model_serialization_test(
+    RosettaResult,
+    (
         ((), {}),
-        ((True,), {}),
-        ((True,), {"deposit": Deposit("")}),
-    )
+        (
+            (),
+            {"deposit": {}, "sip": {}},
+        ),
+    ),
+)
+
+print(RosettaResult().json)
+
+test_ingestresult_json = get_model_serialization_test(
+    IngestResult,
+    (
+        ((), {}),
+        (
+            (),
+            {"success": True, "details": RosettaResult()},
+        ),
+    ),
 )
