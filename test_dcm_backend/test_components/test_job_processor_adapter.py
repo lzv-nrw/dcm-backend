@@ -391,6 +391,73 @@ def test_build_request_body_import_ies_plugin_test_mode():
     assert request_body["import"]["args"]["test"] is True
 
 
+@pytest.mark.parametrize(
+    "test_mode",
+    (True, False),
+)
+def test_build_request_body_test_mode_pass_through(test_mode):
+    """
+    Test `test_mode`-flag propagation through method
+    `JobProcessorAdapter.build_request_body`.
+    """
+    adapter = JobProcessorAdapter(
+        FakeDB(
+            {
+                "templates": {
+                    DemoData.template1: {
+                        "id": DemoData.template1,
+                        "status": "ok",
+                        "type": "hotfolder",
+                        "additional_information": {
+                            "source_id": DemoData.hotfolder_import_source1
+                        }
+                    },
+                    DemoData.template2: {
+                        "id": DemoData.template2,
+                        "status": "ok",
+                        "type": "oai",
+                        "additional_information": {
+                            "transfer_url_filters": []
+                        }
+                    }
+                },
+                "hotfolder_import_sources": {
+                    DemoData.hotfolder_import_source1: {
+                        "id": DemoData.hotfolder_import_source1,
+                        "name": "some source",
+                        "path": "some/path",
+                    }
+                }
+            }
+        ),
+        "",
+    )
+    assert (
+        adapter.build_request_body(
+            JobConfig(
+                template_id=DemoData.template1,
+                status="ok",
+                id_=DemoData.job_config1,
+            ),
+            {},
+            test_mode,
+        )["process"]["args"]["import_ips"]["import"].get("test", False)
+        is test_mode
+    )
+    assert (
+        adapter.build_request_body(
+            JobConfig(
+                template_id=DemoData.template2,
+                status="ok",
+                id_=DemoData.job_config2,
+            ),
+            {},
+            test_mode,
+        )["process"]["args"]["import_ies"]["import"]["args"].get("test", False)
+        is test_mode
+    )
+
+
 def test_build_request_body_import_ies_oai_pmh():
     """
     Test method `JobProcessorAdapter.build_request_body_import_ies` for

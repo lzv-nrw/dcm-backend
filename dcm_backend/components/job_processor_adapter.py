@@ -350,7 +350,7 @@ class JobProcessorAdapter(ServiceAdapter):
 
         # - import_ies
         self.build_request_body_import_ies(
-            args["import_ies"], template, job_config_
+            args["import_ies"], template, job_config_, test_mode
         )
 
         # - build_ip
@@ -367,6 +367,7 @@ class JobProcessorAdapter(ServiceAdapter):
                 ImportSource.from_row(src)
                 for src in self._db.get_rows("hotfolder_import_sources").eval()
             ],
+            test_mode,
         )
 
         # - validation_metadata
