@@ -52,11 +52,11 @@ class UserConfig(CuMetadata):
               (default empty list)
     widget_config -- widget configuration
 
-    Inherites metadata-fields from `CuMetadata`.
+    Inherits metadata-fields from `CuMetadata`.
     """
     id_: Optional[str] = None
     external_id: Optional[str] = None
-    username: str
+    username: Optional[str] = None
     status: Optional[str] = None
     firstname: Optional[str] = None
     lastname: Optional[str] = None
@@ -69,7 +69,7 @@ class UserConfig(CuMetadata):
         *,
         id_: Optional[str] = None,
         external_id: Optional[str] = None,
-        username: str,
+        username: Optional[str] = None,
         status: Optional[str] = None,
         firstname: Optional[str] = None,
         lastname: Optional[str] = None,

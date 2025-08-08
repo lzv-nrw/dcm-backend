@@ -89,6 +89,7 @@ Service-specific environment variables are
   and user 'feynman' with password 'superfluidity'.
   Furthermore, an administrator called 'admin' is created, the corresponding password is printed to stdout on app-startup (see also `DB_DEMO_ADMIN_PW`).
 * `DB_DEMO_ADMIN_PW` [DEFAULT null] if set, the generated administrator-account gets assigned this password instead of a random one
+* `DB_STRICT_SCHEMA_VERSION` [DEFAULT 0] whether to enforce matching database schema version with respect to currently installed `dcm-database`
 
 ### Users
 * `REQUIRE_USER_ACTIVATION` [DEFAULT 1]: whether new users are required to set password before login

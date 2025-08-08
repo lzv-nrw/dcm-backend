@@ -47,6 +47,9 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
     DB_SCHEMA = Path(dcm_database.__file__).parent / "init.sql"
     DB_LOAD_SCHEMA = (int(os.environ.get("DB_LOAD_SCHEMA") or 0)) == 1
     DB_GENERATE_DEMO = (int(os.environ.get("DB_GENERATE_DEMO") or 0)) == 1
+    DB_STRICT_SCHEMA_VERSION = (
+        int(os.environ.get("DB_STRICT_SCHEMA_VERSION") or 0)
+    ) == 1
 
     # ------ USERS ------
     DB_GENERATE_DEMO_USERS = (

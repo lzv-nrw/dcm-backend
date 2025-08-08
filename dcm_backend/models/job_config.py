@@ -364,7 +364,7 @@ class JobConfig(CuMetadata):
     scheduled_exec -- datetime of planned execution
                       (default None)
 
-    Inherites metadata-fields from `CuMetadata`.
+    Inherits metadata-fields from `CuMetadata`.
     """
 
     template_id: str

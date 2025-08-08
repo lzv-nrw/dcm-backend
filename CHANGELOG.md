@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.4.0] - 2025-08-08
+
+### Changed
+
+- implemented soft-delete option for requests to `PUT-/user/configure` (triggered by sending status 'deleted')
+- simplified DELETE-/user/configure endpoint
+
+### Added
+
+- added validation of schema version to database initialization extension
+- added job-configuration-template-id query-filter for `OPTIONS-/job/configure`
+- added user-group query-filter for `OPTIONS-/user/configure`
+- added support for `"deleted"`-status in `UserConfig`
+
+### Fixed
+
+- fixed scheduler extension depending on pre-loaded database schema
+- fixed support for template-drafts
+- fixed retaining an existing `latest_exec` token after updating a job configuration
+
 ## [3.0.1] - 2025-07-30
 
 ### Fixed

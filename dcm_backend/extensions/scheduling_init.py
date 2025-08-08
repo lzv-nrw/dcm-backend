@@ -17,19 +17,26 @@ from dcm_backend.models import JobConfig, JobInfo
 
 
 def _scheduling_init(config, scheduler, db, abort, result, requirements):
-    first_try = True
     while not _ExtensionRequirement.check_requirements(
         requirements,
         "Initializing scheduler delayed until '{}' is ready.",
     ):
-        first_try = False
         abort.wait(config.SCHEDULER_INIT_STARTUP_INTERVAL)
         if abort.is_set():
             return
 
-    for job_config in db.get_rows("job_configs").eval(
-        "scheduler initialization"
-    ):
+    try:
+        job_configs = db.get_rows("job_configs").eval(
+            "scheduler initialization"
+        )
+    except ValueError as exc_info:
+        print_status(
+            "WARNING: Unable to load existing job configurations "
+            + f"({exc_info})."
+        )
+        job_configs = []
+
+    for job_config in job_configs:
         config = JobConfig.from_row(job_config)
         # load previous execution
         if config.latest_exec is not None:
@@ -54,8 +61,7 @@ def _scheduling_init(config, scheduler, db, abort, result, requirements):
         if plan is not None:
             print_status(f"Scheduled job '{job_config['id']}' at '{plan.at}'.")
 
-    if not first_try:
-        print_status("Scheduler initialized.")
+    print_status("Scheduler initialized.")
 
     result.ready.set()
 

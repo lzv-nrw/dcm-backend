@@ -125,7 +125,7 @@ test_template_config_json = get_model_serialization_test(
             {
                 "status": "draft",
                 "type_": "plugin",
-                "additional_information": PluginInfo("p-0", {}),
+                "additional_information": {"any": "data"},
             },
         ),
         (
@@ -133,7 +133,7 @@ test_template_config_json = get_model_serialization_test(
             {
                 "status": "draft",
                 "type_": "hotfolder",
-                "additional_information": HotfolderInfo("some-id"),
+                "additional_information": {"any": "data"},
             },
         ),
         (
@@ -141,7 +141,7 @@ test_template_config_json = get_model_serialization_test(
             {
                 "status": "draft",
                 "type_": "oai",
-                "additional_information": OAIInfo("url", "prefix", []),
+                "additional_information": {"any": "data"},
             },
         ),
         (
@@ -158,6 +158,28 @@ test_template_config_json = get_model_serialization_test(
                 "datetime_created": "0",
                 "user_modified": "b",
                 "datetime_modified": "1",
+            },
+        ),
+        (
+            (),
+            {
+                "status": "ok",
+                "id_": "a",
+                "workspace_id": "ws0",
+                "name": "Display Name",
+                "type_": "hotfolder",
+                "additional_information": HotfolderInfo("some-id"),
+            },
+        ),
+        (
+            (),
+            {
+                "status": "ok",
+                "id_": "a",
+                "workspace_id": "ws0",
+                "name": "Display Name",
+                "type_": "oai",
+                "additional_information": OAIInfo("url", "prefix", []),
             },
         ),
     ),

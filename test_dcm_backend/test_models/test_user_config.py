@@ -22,7 +22,7 @@ test_group_membership_json = get_model_serialization_test(
 test_user_config_json = get_model_serialization_test(
     UserConfig,
     (
-        ((), {"username": "a"}),
+        ((), {}),
         (
             (),
             {

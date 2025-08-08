@@ -852,6 +852,54 @@ def test_get_job_handler(json, status):
             # query-params
             ({}, Responses.GOOD.status),
             ({"unknown": ""}, 400),
+            ({"group": "ab c"}, 422),
+            ({"group": "abc"}, Responses.GOOD.status),
+            ({"group": "abc,def"}, Responses.GOOD.status),
+        ]
+    ),
+    ids=[f"stage {i+1}" for i in range(len(pytest_args))],
+)
+def test_list_users_handler(json, status):
+    """Test `list_users_handler`."""
+
+    output = handlers.list_users_handler.run(json=json)
+
+    assert output.last_status == status
+    if status != Responses.GOOD.status:
+        print(output.last_message)
+
+
+@pytest.mark.parametrize(
+    ("json", "status"),
+    (
+        pytest_args := [
+            # bad types do not need testing since this is a handler for
+            # query-params
+            ({}, Responses.GOOD.status),
+            ({"unknown": ""}, 400),
+            ({"templateId": "abc"}, Responses.GOOD.status),
+        ]
+    ),
+    ids=[f"stage {i+1}" for i in range(len(pytest_args))],
+)
+def test_list_job_configs_handler(json, status):
+    """Test `list_job_configs_handler`."""
+
+    output = handlers.list_job_configs_handler.run(json=json)
+
+    assert output.last_status == status
+    if status != Responses.GOOD.status:
+        print(output.last_message)
+
+
+@pytest.mark.parametrize(
+    ("json", "status"),
+    (
+        pytest_args := [
+            # bad types do not need testing since this is a handler for
+            # query-params
+            ({}, Responses.GOOD.status),
+            ({"unknown": ""}, 400),
             ({"id": "value"}, Responses.GOOD.status),
             ({"status": "123"}, 422),
             ({"status": "abc'"}, 422),
@@ -989,6 +1037,49 @@ def test_get_records_handler(json, status):
                 },
                 Responses().GOOD.status,
             ),
+            (
+                {
+                    "id": "a",
+                    "status": "ok",
+                    "username": "a",
+                },
+                400,
+            ),
+            (
+                {
+                    "id": "a",
+                    "status": "inactive",
+                    "username": "a",
+                },
+                400,
+            ),
+            (
+                {
+                    "id": "a",
+                    "status": "deleted",
+                    "username": "a",
+                    "email": "a@b.c",
+                },
+                400,
+            ),
+            (
+                {
+                    "id": "a",
+                    "status": "deleted",
+                    "username": "a",
+                },
+                Responses().GOOD.status,
+            ),
+            (
+                {
+                    "id": "a",
+                    "status": "deleted",
+                    "username": "a",
+                    "firstname": "b",
+                    "lastname": "c",
+                },
+                Responses().GOOD.status,
+            ),
         ]
     ),
     ids=[f"stage {i+1}" for i in range(len(pytest_args))],
@@ -1000,6 +1091,7 @@ def test_get_user_config_handler_true(
 
     output = handlers.get_user_config_handler(True).run(json=json)
 
+    print(output.last_message)
     assert output.last_status == status
     if status != Responses.GOOD.status:
         print(output.last_message)
@@ -1396,7 +1488,7 @@ def test_get_workspace_config_handler_created_metadata_false(json, status):
     (
         pytest_args := [
             ({"no-required": None}, 400),
-            ({"id": None}, 422),
+            ({"id": None}, 400),
             ({"id": None, "unknown": None}, 400),
             ({"id": "a", "status": None}, 422),
             ({"id": "a", "status": "not-ok"}, 422),
@@ -1448,7 +1540,6 @@ def test_get_workspace_config_handler_created_metadata_false(json, status):
                 {
                     "id": "a",
                     "status": "draft",
-                    "name": "b",
                     "type": "hotfolder",
                     "additionalInformation": None,
                 },
@@ -1458,7 +1549,6 @@ def test_get_workspace_config_handler_created_metadata_false(json, status):
                 {
                     "id": "a",
                     "status": "draft",
-                    "name": "b",
                     "type": "unknown",
                     "additionalInformation": {"unknown": "."},
                 },
@@ -1468,24 +1558,26 @@ def test_get_workspace_config_handler_created_metadata_false(json, status):
                 {
                     "id": "a",
                     "status": "draft",
-                    "name": "b",
-                    "description": "c",
                     "type": "hotfolder",
                     "additionalInformation": {"no-path": "."},
                 },
-                400,
+                Responses().GOOD.status,
             ),
             (
                 {
                     "id": "a",
                     "status": "draft",
-                    "workspaceId": None,
-                    "name": "b",
-                    "description": "c",
                     "type": "hotfolder",
                     "additionalInformation": {"sourceId": None},
                 },
-                422,
+                Responses().GOOD.status,
+            ),
+            (
+                {
+                    "id": "a",
+                    "status": "draft",
+                },
+                Responses().GOOD.status,
             ),
         ]
     ),

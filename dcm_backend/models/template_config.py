@@ -165,7 +165,7 @@ class TemplateConfig(CuMetadata):
     type_ -- connection type for this template
     additional_information -- type-specific data
 
-    Inherites metadata-fields from `CuMetadata`.
+    Inherits metadata-fields from `CuMetadata`.
     """
 
     id_: Optional[str]
@@ -174,7 +174,9 @@ class TemplateConfig(CuMetadata):
     name: Optional[str]
     description: Optional[str]
     type_: Optional[str]
-    additional_information: Optional[PluginInfo | HotfolderInfo | OAIInfo]
+    additional_information: Optional[
+        JSONObject | PluginInfo | HotfolderInfo | OAIInfo
+    ]
 
     def __init__(
         self,
@@ -185,9 +187,9 @@ class TemplateConfig(CuMetadata):
         name: Optional[str] = None,
         description: Optional[str] = None,
         type_: Optional[str] = None,
-        additional_information: Optional[PluginInfo | HotfolderInfo | OAIInfo] = (
-            None
-        ),
+        additional_information: Optional[
+            JSONObject | PluginInfo | HotfolderInfo | OAIInfo
+        ] = (None),
         **kwargs,
     ) -> None:
         self.id_ = id_
@@ -226,9 +228,15 @@ class TemplateConfig(CuMetadata):
                     f"Got unexpected 'type' of '{kwargs['type_']}' while "
                     + "deserializing 'TemplateConfig'."
                 )
-            kwargs["additional_information"] = INFO_INDEX[
-                kwargs["type_"]
-            ].from_json(json["additionalInformation"])
+            # accept raw JSON in case of draft
+            if kwargs["status"] == "draft":
+                kwargs["additional_information"] = json[
+                    "additionalInformation"
+                ]
+            else:
+                kwargs["additional_information"] = INFO_INDEX[
+                    kwargs["type_"]
+                ].from_json(json["additionalInformation"])
 
         return cls(**kwargs)
 
@@ -264,6 +272,8 @@ class TemplateConfig(CuMetadata):
         """Handles `additional_information`-serialization."""
         if value is None:
             DataModel.skip()
+        if isinstance(value, dict):
+            return value
         return value.json
 
     @property
@@ -277,7 +287,10 @@ class TemplateConfig(CuMetadata):
             "type": self.type_,
         }
         if self.additional_information is not None:
-            row["additional_information"] = self.additional_information.row
+            if isinstance(self.additional_information, dict):
+                row["additional_information"] = self.additional_information
+            else:
+                row["additional_information"] = self.additional_information.row
         if self.id_ is not None:
             row["id"] = self.id_
         if self.user_created is not None:
@@ -306,7 +319,13 @@ class TemplateConfig(CuMetadata):
             "datetime_modified": row.get("datetime_modified"),
         }
         if kwargs["type_"] is not None:
-            kwargs["additional_information"] = INFO_INDEX[
-                kwargs["type_"]
-            ].from_row(row.get("additional_information"))
+            # accept raw JSON in case of draft
+            if kwargs["status"] == "draft":
+                kwargs["additional_information"] = row.get(
+                    "additional_information"
+                )
+            else:
+                kwargs["additional_information"] = INFO_INDEX[
+                    kwargs["type_"]
+                ].from_row(row.get("additional_information"))
         return cls(**kwargs)

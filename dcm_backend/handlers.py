@@ -64,7 +64,7 @@ post_ingest_rosetta_target_handler = Object(
     properties={
         Property("subdirectory", required=True): String(),
     },
-    accept_only=["subdirectory"]
+    accept_only=["subdirectory"],
 ).assemble(".ingest.target")
 
 
@@ -99,7 +99,7 @@ get_ingest_handler = Object(
         ),
         Property("depositId", "deposit_id", required=True): String(
             pattern=r".+"
-        )
+        ),
     },
     accept_only=["archiveId", "depositId"],
 ).assemble()
@@ -345,6 +345,24 @@ get_job_handler = Object(
 ).assemble()
 
 
+list_users_handler = Object(
+    properties={
+        # to simplify implementation, accept anything and check during
+        # running job
+        Property("group", "groups"): String(pattern=r"^[^,\s]+(,[^,\s]+)*$"),
+    },
+    accept_only=["group"],
+).assemble()
+
+
+list_job_configs_handler = Object(
+    properties={
+        Property("templateId", "template_id"): String(),
+    },
+    accept_only=["templateId"],
+).assemble()
+
+
 # the associated method in the JobView uses a custom command via the
 # database adapter which needs to be done very cautiously
 list_jobs_handler = Object(
@@ -383,7 +401,7 @@ def get_user_config_handler(
     require_id: bool,
     accept_creation_md: bool = False,
     accept_modification_md: bool = False,
-) -> Pipeline:
+) -> ConditionalPipeline:
     """
     Returns a `UserConfig`-handler.
 
@@ -392,32 +410,37 @@ def get_user_config_handler(
     accept_creation_md -- whether to accept creation-metadata
     accept_modification_md -- whether to accept modification-metadata
     """
-    return Object(
-        model=lambda **kwargs: {"config": UserConfig.from_json(kwargs)},
-        properties={
-            Property("id", required=require_id): String(),
-            Property("externalId"): String(),
-            Property("username", required=True): String(),
-            Property("status"): String(enum=["inactive", "ok"]),
-            Property("firstname"): String(),
-            Property("lastname"): String(),
-            Property("email", required=True): String(
-                pattern=r"[a-zA-Z0-9+._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+"
-            ),
-            Property("groups"): Array(
-                items=Object(
-                    properties={
-                        Property("id", required=True): String(),
-                        Property("workspace"): String(),
-                    },
-                    accept_only=["id", "workspace"],
-                )
-            ),
-            Property("widgetConfig"): Object(free_form=True),
-        }
-        | ConfigurationMetadataCreated
-        | ConfigurationMetadataModified,
-        accept_only=[
+
+    class _ConditionalPipeline:
+        PREREQUISITES = Object(
+            properties={
+                Property("status"): String(enum=["ok", "inactive", "deleted"])
+            }
+        ).assemble()
+
+        def __init__(self, on_ok_or_inactive: Pipeline, on_deleted: Pipeline):
+            self._on_ok_or_inactive = on_ok_or_inactive
+            self._on_deleted = on_deleted
+
+        def run(self, json) -> tuple[Any, str, int]:
+            """Run corresponding pipeline"""
+            prerequisites = self.PREREQUISITES.run(json=json)
+            if prerequisites.last_status != Responses().GOOD.status:
+                return prerequisites
+
+            status = (json or {}).get("status", "ok")
+
+            match status:
+                case "ok" | "inactive":
+                    return self._on_ok_or_inactive.run(json=json or {})
+                case "deleted":
+                    return self._on_deleted.run(json=json or {})
+
+            raise ValueError(f"Uncaught unknown status '{status}'.")
+
+    common_properties = ()
+    common_keys = (
+        [
             "id",
             "externalId",
             "username",
@@ -433,8 +456,70 @@ def get_user_config_handler(
             ["userModified", "datetimeModified"]
             if accept_modification_md
             else []
-        ),
-    ).assemble()
+        )
+    )
+
+    return _ConditionalPipeline(
+        on_ok_or_inactive=Object(
+            model=lambda **kwargs: {"config": UserConfig.from_json(kwargs)},
+            properties={
+                Property("id", required=require_id): String(),
+                Property("status"): String(enum=["inactive", "ok"]),
+                Property("username", required=True): String(),
+                Property("externalId"): String(),
+                Property("firstname"): String(),
+                Property("lastname"): String(),
+                Property("email", required=True): String(
+                    pattern=r"[a-zA-Z0-9+._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+"
+                ),
+                Property("groups"): Array(
+                    items=Object(
+                        properties={
+                            Property("id", required=True): String(),
+                            Property("workspace"): String(),
+                        },
+                        accept_only=["id", "workspace"],
+                    )
+                ),
+                Property("widgetConfig"): Object(free_form=True),
+            }
+            | ConfigurationMetadataCreated
+            | ConfigurationMetadataModified
+            | {},
+            accept_only=[
+                "id",
+                "externalId",
+                "username",
+                "status",
+                "firstname",
+                "lastname",
+                "email",
+                "groups",
+                "widgetConfig",
+            ]
+            + (
+                ["userCreated", "datetimeCreated"]
+                if accept_creation_md
+                else []
+            )
+            + (
+                ["userModified", "datetimeModified"]
+                if accept_modification_md
+                else []
+            ),
+        ).assemble(),
+        on_deleted=Object(
+            model=lambda **kwargs: {"config": UserConfig.from_json(kwargs)},
+            properties={
+                Property("id", required=require_id): String(),
+                Property("status"): String(enum=["deleted"]),
+                Property("username", required=True): String(),
+                Property("firstname"): String(),
+                Property("lastname"): String(),
+            },
+            accept_only=["id", "status", "username", "firstname", "lastname"],
+        ).assemble(),
+    )
 
 
 user_login_handler = Object(
@@ -496,78 +581,127 @@ def get_template_config_handler(
     require_id: bool,
     accept_creation_md: bool = False,
     accept_modification_md: bool = False,
-) -> Pipeline:
+) -> ConditionalPipeline:
     """
-    Returns a `TemplateConfig`-handler.
+    Returns a `Template`-handler.
 
     Keyword arguments:
     require_id -- if `True`, `id_` is required
     accept_creation_md -- whether to accept creation-metadata
     accept_modification_md -- whether to accept modification-metadata
     """
-    return Object(
-        model=lambda **kwargs: {"config": TemplateConfig.from_json(kwargs)},
-        properties={
-            Property("id", required=require_id): String(),
-            Property("status", required=True): String(enum=["draft", "ok"]),
-            Property("workspaceId"): String(),
-            Property("name", required=True): String(),
-            Property("description"): String(),
-            Property("type", required=True): String(
-                enum=["plugin", "oai", "hotfolder"]
-            ),
-            Property("additionalInformation", required=True): Object(
-                properties={
-                    Property("plugin", required=True): String(),
-                    Property("args", required=True): Object(free_form=True),
-                },
-                accept_only=["plugin", "args"],
-            )
-            | Object(
-                properties={
-                    Property("sourceId", required=True): String(),
-                },
-                accept_only=["sourceId"],
-            )
-            | Object(
-                properties={
-                    Property("url", required=True): Url(),
-                    Property("metadataPrefix", required=True): String(),
-                    Property(
+    return ConditionalPipeline(
+        on_ok=Object(
+            model=lambda **kwargs: {
+                "config": TemplateConfig.from_json(kwargs)
+            },
+            properties={
+                Property("id", required=require_id): String(),
+                Property("status", required=True): String(
+                    enum=["draft", "ok"]
+                ),
+                Property("workspaceId"): String(),
+                Property("name", required=True): String(),
+                Property("description"): String(),
+                Property("type", required=True): String(
+                    enum=["plugin", "oai", "hotfolder"]
+                ),
+                Property("additionalInformation", required=True): Object(
+                    properties={
+                        Property("plugin", required=True): String(),
+                        Property("args", required=True): Object(
+                            free_form=True
+                        ),
+                    },
+                    accept_only=["plugin", "args"],
+                )
+                | Object(
+                    properties={
+                        Property("sourceId", required=True): String(),
+                    },
+                    accept_only=["sourceId"],
+                )
+                | Object(
+                    properties={
+                        Property("url", required=True): Url(),
+                        Property("metadataPrefix", required=True): String(),
+                        Property(
+                            "transferUrlFilters",
+                            required=True,
+                        ): Array(
+                            items=Object(
+                                properties={
+                                    Property("regex", required=True): String(),
+                                    Property("path"): String(),
+                                },
+                                accept_only=["regex", "path"],
+                            )
+                        ),
+                    },
+                    accept_only=[
+                        "url",
+                        "metadataPrefix",
                         "transferUrlFilters",
-                        required=True,
-                    ): Array(
-                        items=Object(
-                            properties={
-                                Property("regex", required=True): String(),
-                                Property("path"): String(),
-                            },
-                            accept_only=["regex", "path"],
-                        )
-                    ),
-                },
-                accept_only=[
-                    "url",
-                    "metadataPrefix",
-                    "transferUrlFilters",
-                ],
+                    ],
+                ),
+            }
+            | ConfigurationMetadataCreated
+            | ConfigurationMetadataModified,
+            accept_only=[
+                "id",
+                "status",
+                "workspaceId",
+                "name",
+                "description",
+                "type",
+                "additionalInformation",
+            ]
+            + (
+                ["userCreated", "datetimeCreated"]
+                if accept_creation_md
+                else []
+            )
+            + (
+                ["userModified", "datetimeModified"]
+                if accept_modification_md
+                else []
             ),
-        }
-        | ConfigurationMetadataCreated
-        | ConfigurationMetadataModified,
-        accept_only=[
-            "id",
-            "status",
-            "workspaceId",
-            "name",
-            "description",
-            "type",
-            "additionalInformation",
-        ]
-        + (["userCreated", "datetimeCreated"] if accept_creation_md else [])
-        + (
-            ["userModified", "datetimeModified"]
-            if accept_modification_md
-            else []
-        ),
-    ).assemble()
+        ).assemble(),
+        on_draft=Object(
+            model=lambda **kwargs: {
+                "config": TemplateConfig.from_json(kwargs)
+            },
+            properties={
+                Property("id", required=require_id): String(),
+                Property("status", required=True): String(
+                    enum=["draft", "ok"]
+                ),
+                Property("workspaceId"): String(),
+                Property("name"): String(),
+                Property("description"): String(),
+                Property("type"): String(enum=["plugin", "oai", "hotfolder"]),
+                Property("additionalInformation"): Object(free_form=True),
+            }
+            | ConfigurationMetadataCreated
+            | ConfigurationMetadataModified,
+            accept_only=[
+                "id",
+                "status",
+                "workspaceId",
+                "name",
+                "description",
+                "type",
+                "additionalInformation",
+            ]
+            + (
+                ["userCreated", "datetimeCreated"]
+                if accept_creation_md
+                else []
+            )
+            + (
+                ["userModified", "datetimeModified"]
+                if accept_modification_md
+                else []
+            ),
+        ).assemble(),
+    )

@@ -196,6 +196,10 @@ def test_job_configure(config_sdk: dcm_backend_sdk.ConfigApi, app_and_db, run_se
         port=8087
     )
 
+    assert config_sdk.list_job_configs(
+        template_id=util.DemoData.template1
+    ) == [util.DemoData.job_config1]
+
     job_config = {
         "status": "ok",
         "templateId": util.DemoData.template1,
@@ -339,6 +343,10 @@ def test_configure_user(
     """Test `/user/configure`-endpoints."""
 
     run_service(app_and_db["app"], probing_path="ready")
+
+    assert config_sdk.list_users(
+        group="admin"
+    ) == [util.DemoData.user0]
 
     minimal_config = {
         "username": "new-user",

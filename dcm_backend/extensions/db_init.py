@@ -1,6 +1,7 @@
 """Database initialization-extension."""
 
 from typing import Callable, Optional, Iterable
+import os
 from threading import Thread, Event
 import signal
 from importlib.metadata import version
@@ -17,12 +18,10 @@ from dcm_backend import util
 
 
 def _db_init(config, db, user_create, abort, result, requirements):
-    first_try = True
     while not _ExtensionRequirement.check_requirements(
         requirements,
         "Initializing database delayed until '{}' is ready.",
     ):
-        first_try = False
         abort.wait(config.DB_INIT_STARTUP_INTERVAL)
         if abort.is_set():
             return
@@ -63,10 +62,7 @@ def _db_init(config, db, user_create, abort, result, requirements):
                 util.DemoData.admin_password = config.DB_DEMO_ADMIN_PW
 
             # setup demo-users
-            util.create_demo_users(
-                db,
-                user_create
-            )
+            util.create_demo_users(db, user_create)
 
             # setup demo-data
             if config.DB_GENERATE_DEMO:
@@ -85,8 +81,32 @@ def _db_init(config, db, user_create, abort, result, requirements):
         else:
             print_status("Skip loading demo (already initialized).")
 
-    if not first_try:
-        print_status("Database initialized.")
+    # check schema version in database against dcm-database
+    def handler(msg):
+        if config.DB_STRICT_SCHEMA_VERSION:
+            print_status("ERROR: " + msg)
+            os._exit(1)
+        print_status("WARNING: " + msg)
+
+    try:
+        schema_version = next(
+            (
+                row
+                for row in db.get_column("deployment", "schema_version").eval()
+                if row is not None
+            ),
+            "unkown",
+        )
+    except ValueError as exc_info:
+        handler(f"Unable to validate schema version ({exc_info}).")
+    else:
+        if schema_version != (package_version := version("dcm-database")):
+            handler(
+                "Database schema versions do not match (package: "
+                + f"'{package_version}'; database: '{schema_version}')."
+            )
+
+    print_status("Database initialized.")
 
     result.ready.set()
 

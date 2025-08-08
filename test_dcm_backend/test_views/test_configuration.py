@@ -264,6 +264,13 @@ def test_put_job(client_and_db):
 
     del job_config0["user_created"]
     del job_config0["datetime_created"]
+    # write 'latest_exec'
+    # to check that updating the job-config does not delete it
+    token_value = str(uuid4())
+    db.update(
+        "job_configs",
+        {"id": util.DemoData.job_config1, "latest_exec": token_value},
+    )
 
     assert (
         client.put(
@@ -272,10 +279,12 @@ def test_put_job(client_and_db):
         ).status_code
         == 200
     )
-    assert (
-        db.get_row("job_configs", util.DemoData.job_config1).eval()["name"]
-        == "test"
-    )
+
+    updated_job_config = db.get_row(
+        "job_configs", util.DemoData.job_config1
+    ).eval()
+    assert updated_job_config["name"] == "test"
+    assert updated_job_config["latest_exec"] == token_value
     client.delete("/schedule")
 
 
@@ -305,6 +314,23 @@ def test_job_options(client_and_db):
     assert sorted(response.json) == sorted(
         [v for k, v in util.DemoData.__dict__.items() if "job" in k]
     )
+
+
+def test_job_options_by_template(client_and_db):
+    """Test endpoint `OPTIONS-/job/configure` of config-API."""
+    client, _ = client_and_db
+
+    template1_jobs = client.options(
+        f"/job/configure?templateId={util.DemoData.template1}"
+    ).json
+    assert len(template1_jobs) == 1
+    assert util.DemoData.job_config1 in template1_jobs
+
+    template2_jobs = client.options(
+        f"/job/configure?templateId={util.DemoData.template2}"
+    ).json
+    assert len(template2_jobs) == 1
+    assert util.DemoData.job_config2 in template2_jobs
 
 
 @pytest.mark.parametrize(
@@ -394,6 +420,26 @@ def test_user_options(client_and_db):
     assert sorted(response.json) == sorted(
         [v for k, v in util.DemoData.__dict__.items() if "user" in k]
     )
+
+
+def test_user_options_by_groups(client_and_db):
+    """Test endpoint `OPTIONS-/user/configure` of config-API."""
+    client, _ = client_and_db
+
+    admins = client.options("/user/configure?group=admin").json
+    assert len(admins) == 1
+    assert util.DemoData.user0 in admins
+
+    curators = client.options("/user/configure?group=curator").json
+    assert len(curators) == 2
+    assert util.DemoData.user1 in curators
+    assert util.DemoData.user2 in curators
+
+    everyone = client.options("/user/configure?group=admin,curator").json
+    assert len(everyone) == 3
+    assert util.DemoData.user0 in everyone
+    assert util.DemoData.user1 in everyone
+    assert util.DemoData.user2 in everyone
 
 
 def test_get_user(client_and_db):
@@ -574,6 +620,34 @@ def test_put_user(client_and_db):
     assert user_config1["email"] == "a@b.c"
 
 
+def test_put_user_deleted(client_and_db):
+    """
+    Test endpoint `PUT-/user/configure` of config-API.
+    """
+    client, db = client_and_db
+    user_config0 = db.get_row("user_configs", util.DemoData.user0).eval()
+    user_secret = db.get_rows(
+        "user_secrets", util.DemoData.user0, "user_id"
+    ).eval()
+    assert len(user_secret) == 1
+
+    assert (
+        client.put(
+            "/user/configure",
+            json={
+                "id": user_config0["id"],
+                "username": "admin",
+                "status": "deleted",
+            },
+        ).status_code
+        == 200
+    )
+    user_secret = db.get_rows(
+        "user_secrets", util.DemoData.user0, "user_id"
+    ).eval()
+    assert len(user_secret) == 0
+
+
 @pytest.mark.parametrize(
     ("groups", "expected_status_code"),
     [
@@ -676,6 +750,14 @@ def test_delete_user(client_and_db):
     """Test endpoint `DELETE-/user/configure` of config-API."""
     client, db = client_and_db
     assert db.get_row("user_configs", util.DemoData.user0).eval() is not None
+    assert len(
+        db.get_rows("user_groups", util.DemoData.user0, "user_id").eval()
+    ) == 1
+    assert len(
+        db.get_rows("user_secrets", util.DemoData.user0, "user_id").eval()
+    ) == 1
+
+    # delete user
     assert (
         client.delete("/user/configure?id=" + util.DemoData.user0).status_code
         == 200
@@ -686,6 +768,12 @@ def test_delete_user(client_and_db):
         == 200
     )
     assert db.get_row("user_configs", util.DemoData.user0).eval() is None
+    assert len(
+        db.get_rows("user_groups", util.DemoData.user0, "user_id").eval()
+    ) == 0
+    assert len(
+        db.get_rows("user_secrets", util.DemoData.user0, "user_id").eval()
+    ) == 0
 
 
 def test_workspace_options(client_and_db):

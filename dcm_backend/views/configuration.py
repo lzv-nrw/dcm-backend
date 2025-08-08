@@ -153,7 +153,7 @@ class ConfigurationView(View):
             """Update job config."""
             # try to load from db
             query = self.db.get_row(
-                "job_configs", config.id_, cols=["id"]
+                "job_configs", config.id_, cols=["id", "latest_exec"]
             ).eval()
             if query is None:
                 return Response(
@@ -163,7 +163,7 @@ class ConfigurationView(View):
                 )
 
             # write given config
-            self.db.update("job_configs", config.row).eval()
+            self.db.update("job_configs", config.row | query).eval()
             # cancel any scheduled plans for this job config
             self.scheduler.clear_jobs(config.id_)
             # re-schedule if not draft
@@ -178,10 +178,25 @@ class ConfigurationView(View):
             methods=["OPTIONS"],
             provide_automatic_options=False
         )
-        def list_configs():
+        @flask_handler(  # process query
+            handler=handlers.list_job_configs_handler,
+            json=flask_args,
+        )
+        def list_configs(template_id: Optional[str] = None):
             """List ids of available job configs."""
+            if template_id is None:
+                job_configs = self.db.get_column("job_configs", "id").eval()
+            else:
+                job_configs = []
+                for config in self.db.get_rows(
+                    "job_configs", template_id, "template_id", ["id"]
+                ).eval(
+                    f"fetching job configurations with template '{template_id}'"
+                ):
+                    if config.get("id") is not None:
+                        job_configs.append(config["id"])
             return (
-                jsonify(self.db.get_column("job_configs", "id").eval()),
+                jsonify(job_configs),
                 200,
             )
 
@@ -209,12 +224,32 @@ class ConfigurationView(View):
             methods=["OPTIONS"],
             provide_automatic_options=False
         )
-        def list_users():
+        @flask_handler(  # process query
+            handler=handlers.list_users_handler,
+            json=flask_args,
+        )
+        def list_users(groups: Optional[str] = None):
             """List ids of existing users."""
-            return (
-                jsonify(self.db.get_column("user_configs", "id").eval()),
-                200,
-            )
+
+            if groups is None:
+                users = self.db.get_column("user_configs", "id").eval()
+            else:
+                users = []
+                # collect group by group
+                for group in groups.split(","):
+                    # process user by user
+                    for user in self.db.get_rows(
+                        "user_groups",
+                        group,
+                        "group_id",
+                        ["user_id"],
+                    ).eval(f"fetching users associated with group '{group}'"):
+                        if (
+                            user.get("user_id")
+                            and user.get("user_id") not in users
+                        ):
+                            users.append(user.get("user_id"))
+            return jsonify(users), 200
 
     def _get_user_config(self, bp: Blueprint):
         @bp.route(
@@ -272,13 +307,18 @@ class ConfigurationView(View):
             """Update user config."""
             # try to load from db
             query = self.db.get_row(
-                "user_configs", config.id_, cols=["id"]
+                "user_configs", config.id_, cols=["id", "username"]
             ).eval()
             if query is None:
                 return Response(
                     f"User '{config.id_}' does not exist.",
                     mimetype="text/plain",
                     status=404,
+                )
+            if query["username"] != config.username:
+                print(
+                    f"Changed username for '{config.id_}' from "
+                    + f"'{query['username']}' to '{config.username}'."
                 )
 
             # validate workspaces for group memberships
@@ -312,6 +352,18 @@ class ConfigurationView(View):
                         },
                     )
             t.result.eval("updating user")
+
+            # remove secrets of deleted users (groups are automatically
+            # removed by the corresponding transaction & the handler not
+            # allowing to specify groups for deleted user)
+            if config.status == "deleted":
+                print(
+                    f"Deleted secret for user '{config.username}' "
+                    + f"({config.id_})."
+                )
+                self.db.delete("user_secrets", config.id_, "user_id").eval(
+                    f"deleting secret for user '{config.username}'"
+                )
 
             return Response("OK", mimetype="text/plain", status=200)
 
@@ -462,15 +514,7 @@ class ConfigurationView(View):
         )
         def delete_user_config(id_: str):
             """Delete user config by `id_`."""
-            with self.db.new_transaction() as t:
-                # delete user groups
-                t.add_delete("user_groups", id_, "user_id")
-                # delete user secrets
-                t.add_delete("user_secrets", id_, "user_id")
-                # delete user
-                t.add_delete("user_configs", id_)
-            t.result.eval("deleting user")
-
+            self.db.delete("user_configs", id_).eval()
             return Response(
                 f"Deleted user '{id_}'.",
                 mimetype="text/plain",

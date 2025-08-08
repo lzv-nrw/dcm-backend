@@ -19,7 +19,7 @@ class WorkspaceConfig(CuMetadata):
     users -- list of user-ids associated with this workspace
     templates -- list of template-ids associated with this workspace
 
-    Inherites metadata-fields from `CuMetadata`.
+    Inherits metadata-fields from `CuMetadata`.
     """
     id_: Optional[str]
     name: str
