@@ -12,6 +12,7 @@ from data_plumber_http import (
     Array,
 )
 from data_plumber_http.settings import Responses
+from dcm_common.services import UUID
 
 from dcm_backend.models import (
     IngestConfig,
@@ -84,11 +85,12 @@ post_ingest_handler = Object(
             },
             accept_only=["archiveId", "target"],
         ),
+        Property("token"): UUID(),
         Property("callbackUrl", name="callback_url"): Url(
             schemes=["http", "https"]
         ),
     },
-    accept_only=["ingest", "callbackUrl"],
+    accept_only=["ingest", "token", "callbackUrl"],
 ).assemble()
 
 
@@ -122,12 +124,13 @@ def get_config_id_handler(required: bool = True, also_allow: list[str] = None):
 post_job_handler = Object(
     properties={
         Property("id", "id_", required=True): String(),
+        Property("token"): UUID(),
         Property(
             "userTriggered",
             "user_triggered",
         ): String(),
     },
-    accept_only=["id", "userTriggered"],
+    accept_only=["id", "token", "userTriggered"],
 ).assemble()
 
 

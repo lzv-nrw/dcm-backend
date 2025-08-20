@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.6.0] - 2025-08-20
+
+### Added
+
+- added support for submission token in job-API
+- added support for submission token in ingest-API
+
 ## [3.4.0] - 2025-08-08
 
 ### Changed

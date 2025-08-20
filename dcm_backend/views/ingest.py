@@ -92,18 +92,28 @@ class IngestView(services.OrchestratedView):
         )
         def ingest(
             ingest: IngestConfig,
+            token: Optional[str] = None,
             callback_url: Optional[str] = None
         ):
             """Submit dir for ingesting in the archive system."""
-            token = self.orchestrator.submit(
-                JobConfig(
-                    request_body={
-                        "ingest": ingest.json,
-                        "callback_url": callback_url
-                    },
-                    context=self.NAME
+            try:
+                token = self.orchestrator.submit(
+                    JobConfig(
+                        request_body={
+                            "ingest": ingest.json,
+                            "callback_url": callback_url
+                        },
+                        context=self.NAME
+                    ),
+                    token=token,
                 )
-            )
+            except ValueError as exc_info:
+                return Response(
+                    f"Submission rejected: {exc_info}",
+                    mimetype="text/plain",
+                    status=400,
+                )
+
             return jsonify(token.json), 201
 
         self._register_abort_job(bp, "/ingest")

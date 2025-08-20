@@ -44,6 +44,48 @@ from dcm_backend import handlers
                 },
                 Responses.GOOD.status,
             ),
+            (
+                {
+                    "ingest": {
+                        "archiveId": "a",
+                        "target": {
+                            "subdirectory": "subdir",
+                            "producer": "0",
+                            "material_flow": "1",
+                        },
+                    },
+                    "token": None,
+                },
+                422,
+            ),
+            (
+                {
+                    "ingest": {
+                        "archiveId": "a",
+                        "target": {
+                            "subdirectory": "subdir",
+                            "producer": "0",
+                            "material_flow": "1",
+                        },
+                    },
+                    "token": "non-uuid",
+                },
+                422,
+            ),
+            (
+                {
+                    "ingest": {
+                        "archiveId": "a",
+                        "target": {
+                            "subdirectory": "subdir",
+                            "producer": "0",
+                            "material_flow": "1",
+                        },
+                    },
+                    "token": "37ee72d6-80ab-4dcd-a68d-f8d32766c80d",
+                },
+                Responses.GOOD.status,
+            ),
         ]
     ),
     ids=[f"stage {i+1}" for i in range(len(pytest_args))],
@@ -99,6 +141,15 @@ def test_config_id_handler_required(json, status):
             ({"id": "value"}, Responses.GOOD.status),
             ({"id": "value", "userTriggered": None}, 422),
             ({"id": "value", "userTriggered": "value"}, Responses.GOOD.status),
+            ({"id": "value", "token": None}, 422),
+            ({"id": "value", "token": "non-uuid"}, 422),
+            (
+                {
+                    "id": "value",
+                    "token": "37ee72d6-80ab-4dcd-a68d-f8d32766c80d",
+                },
+                Responses.GOOD.status,
+            ),
         ]
     ),
     ids=[f"stage {i+1}" for i in range(len(pytest_args))],

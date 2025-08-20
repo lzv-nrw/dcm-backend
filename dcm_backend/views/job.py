@@ -166,14 +166,17 @@ class JobView(View):
             )
 
     def _post_job(self, bp: Blueprint):
-        @bp.route(
-            "/job", methods=["POST"], provide_automatic_options=False
-        )
+
+        @bp.route("/job", methods=["POST"], provide_automatic_options=False)
         @flask_handler(  # process query
             handler=handlers.post_job_handler,
             json=flask_json,
         )
-        def post_job(id_: str, user_triggered: Optional[str] = None):
+        def post_job(
+            id_: str,
+            token: Optional[str] = None,
+            user_triggered: Optional[str] = None,
+        ):
             """Start job associated with config `id_`."""
             # get job config
             query = self.db.get_row("job_configs", id_).eval()
@@ -206,6 +209,7 @@ class JobView(View):
                             "datetimeTriggered": util.now().isoformat(),
                             "triggerType": TriggerType.MANUAL.value,
                         }
+                        | ({} if token is None else {"token": token})
                     },
                 ),
                 info := services.APIResult(),
