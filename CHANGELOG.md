@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.7.0] - 2025-08-22
+
+### Changed
+
+- updated behavior for deleting workspaces associated with users or templates (causes delete via cascade in users, and clears link for templates)
+
 ## [3.6.0] - 2025-08-20
 
 ### Added

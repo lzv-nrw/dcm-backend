@@ -882,7 +882,7 @@ def test_delete_workspace(client_and_db, minimal_workspace_config):
     assert db.get_row("workspaces", ws_id).eval() is None
 
 
-def test_delete_workspace_forbidden_template(
+def test_delete_workspace_w_linked_template(
     client_and_db, minimal_workspace_config, minimal_template_config
 ):
     """
@@ -893,15 +893,17 @@ def test_delete_workspace_forbidden_template(
 
     # associated template
     ws_id = db.insert("workspaces", minimal_workspace_config).eval()
-    db.insert(
+    template_id = db.insert(
         "templates",
         TemplateConfig.from_json(minimal_template_config).row
         | {"workspace_id": ws_id},
     ).eval()
-    assert client.delete("/workspace/configure?id=" + ws_id).status_code == 403
+    assert client.delete("/workspace/configure?id=" + ws_id).status_code == 200
+    # workspace is cleared in template as well
+    assert db.get_row("templates", template_id).eval()["workspace_id"] is None
 
 
-def test_delete_workspace_forbidden_user(
+def test_delete_workspace_w_linked_user(
     client_and_db, minimal_workspace_config
 ):
     """
@@ -912,7 +914,7 @@ def test_delete_workspace_forbidden_user(
 
     # associated template
     ws_id = db.insert("workspaces", minimal_workspace_config).eval()
-    db.insert(
+    group_id = db.insert(
         "user_groups",
         {
             "user_id": util.DemoData.user0,
@@ -920,7 +922,9 @@ def test_delete_workspace_forbidden_user(
             "group_id": "curator",
         },
     ).eval()
-    assert client.delete("/workspace/configure?id=" + ws_id).status_code == 403
+    assert client.delete("/workspace/configure?id=" + ws_id).status_code == 200
+    # user-group is deleted as well
+    assert db.get_row("user_groups", group_id).eval() is None
 
 
 def test_template_options(client_and_db):

@@ -660,34 +660,6 @@ class ConfigurationView(View):
         )
         def delete_workspace_config(id_: str):
             """Delete workspace config by `id_`."""
-            if (
-                len(
-                    self.db.get_rows(
-                        "user_groups", id_, "workspace_id", cols=["id"]
-                    ).eval()
-                )
-                > 0
-            ):
-                return Response(
-                    f"Cannot delete '{id_}' as there are still users "
-                    + "associated with that workspace.",
-                    mimetype="text/plain",
-                    status=403,
-                )
-            if (
-                len(
-                    self.db.get_rows(
-                        "templates", id_, "workspace_id", cols=["id"]
-                    ).eval()
-                )
-                > 0
-            ):
-                return Response(
-                    f"Cannot delete '{id_}' as there are still templates "
-                    + "associated with that workspace.",
-                    mimetype="text/plain",
-                    status=403,
-                )
             self.db.delete("workspaces", id_).eval()
             return Response(
                 f"Deleted workspace '{id_}'.",
