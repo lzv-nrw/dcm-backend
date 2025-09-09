@@ -3,28 +3,32 @@
 from flask import jsonify
 from dcm_common import LoggingContext as Context
 
+from dcm_backend import app_factory
+
 
 def test_post_ingest_minimal(
-    client,
     minimal_request_body,
-    wait_for_report,
     rosetta_stub,
     run_service,
+    testing_config,
 ):
     """Test basic functionality of /ingest-POST endpoint."""
+
+    app = app_factory(testing_config())
+    client = app.test_client()
 
     # run dummy Rosetta instance
     run_service(rosetta_stub, port=5050)
 
     # submit job
     response = client.post("/ingest", json=minimal_request_body)
-    assert client.put("/orchestration?until-idle", json={}).status_code == 200
     assert response.status_code == 201
     assert response.mimetype == "application/json"
     token = response.json["value"]
 
     # wait until job is completed
-    json = wait_for_report(client, token)
+    app.extensions["orchestra"].stop(stop_on_idle=True)
+    json = client.get(f"/report?token={token}").json
 
     assert Context.ERROR.name not in json["log"]
     assert json["data"]["success"]
@@ -34,19 +38,22 @@ def test_post_ingest_minimal(
 
 
 def test_post_ingest_fail_post_error(
-    client, minimal_request_body, wait_for_report, run_service
+    minimal_request_body, run_service, testing_config
 ):
     """
     Test the /ingest-POST endpoint with a requests error
     during the post request.
     """
 
+    app = app_factory(testing_config())
+    client = app.test_client()
+
     # run dummy Rosetta instance
     run_service(
         routes=[
             (
                 "/rest/v0/deposits",
-                lambda id_: ("deposit-error", 400),
+                lambda *args, **kwargs: ("deposit-error", 400),
                 ["POST"],
             ),
         ],
@@ -55,25 +62,28 @@ def test_post_ingest_fail_post_error(
 
     # submit job
     response = client.post("/ingest", json=minimal_request_body)
-    assert client.put("/orchestration?until-idle", json={}).status_code == 200
 
     assert response.status_code == 201
     assert response.mimetype == "application/json"
 
     # wait until job is completed
-    json = wait_for_report(client, response.json["value"])
+    app.extensions["orchestra"].stop(stop_on_idle=True)
+    json = client.get(f"/report?token={response.json['value']}").json
 
     assert Context.ERROR.name in json["log"]
     assert not json["data"]["success"]
 
 
 def test_post_ingest_success_get_error(
-    client, minimal_request_body, wait_for_report, run_service
+    minimal_request_body, run_service, testing_config
 ):
     """
     Test the /ingest-POST endpoint, when the ingest is successfully triggered,
     but there is an error during the GET-request in the archive system.
     """
+
+    app = app_factory(testing_config())
+    client = app.test_client()
 
     # run dummy Rosetta instance
     fake_deposit = {"id": "x", "sip_id": "y"}
@@ -91,8 +101,10 @@ def test_post_ingest_success_get_error(
 
     # submit job
     response = client.post("/ingest", json=minimal_request_body)
-    assert client.put("/orchestration?until-idle", json={}).status_code == 200
-    json = wait_for_report(client, response.json["value"])
+
+    # wait until job is completed
+    app.extensions["orchestra"].stop(stop_on_idle=True)
+    json = client.get(f"/report?token={response.json['value']}").json
 
     assert Context.ERROR.name in json["log"]
     assert json["data"]["success"]
@@ -101,19 +113,22 @@ def test_post_ingest_success_get_error(
 
 
 def test_get_status_minimal(
-    client, minimal_request_body, wait_for_report, run_service, rosetta_stub
+    minimal_request_body, run_service, rosetta_stub, testing_config
 ):
     """Test basic functionality of /ingest-GET endpoint."""
+
+    app = app_factory(testing_config())
+    client = app.test_client()
 
     # run dummy Rosetta instance
     run_service(rosetta_stub, port=5050)
 
     # submit job
     token = client.post("/ingest", json=minimal_request_body).json["value"]
-    assert client.put("/orchestration?until-idle", json={}).status_code == 200
 
     # wait until job is completed
-    json = wait_for_report(client, token)
+    app.extensions["orchestra"].stop(stop_on_idle=True)
+    json = client.get(f"/report?token={token}").json
 
     response = client.get(
         f"/ingest?archiveId=a&depositId={json['data']['details']['deposit']['id']}"
@@ -130,8 +145,12 @@ def test_get_status_minimal(
     assert response.json["details"].get("sip") is not None
 
 
-def test_get_status_error(client, run_service):
+def test_get_status_error(testing_config, run_service):
     """Test error-handling of /ingest-GET endpoint."""
+
+    app = app_factory(testing_config())
+    client = app.test_client()
+    app.extensions["orchestra"].stop(stop_on_idle=True)
 
     # run dummy Rosetta instance
     run_service(

@@ -20,8 +20,8 @@ def _minimal_config():
         "schedule": {
             "active": True,
             "start": now().isoformat(),
-            "repeat": {"unit": "week", "interval": 1}
-        }
+            "repeat": {"unit": "week", "interval": 1},
+        },
     }
 
 
@@ -38,38 +38,31 @@ def _minimal_info():
         "metadata": {
             "produced": {
                 "by": "job-processor",
-                "datetime": "2024-01-01T00:00:00.000000+01:00"
+                "datetime": "2024-01-01T00:00:00.000000+01:00",
             }
-        }
+        },
     }
 
 
-@pytest.fixture(name="client_and_db")
-def _client_and_db(testing_config):
-    config = testing_config()
-    return (
-        app_factory(config, block=True).test_client(),
-        config.db,
-    )
-
-
-def test_get_minimal(client_and_db):
+def test_get_minimal(no_orchestra_testing_config):
     """Minimal test endpoint `GET-/job` of job-API."""
-    client, _ = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
     response = client.get(f"/job?token={util.DemoData.token1}")
 
     assert response.status_code == 200
     assert response.mimetype == "application/json"
 
 
-def test_get_keys(client_and_db):
+def test_get_keys(no_orchestra_testing_config):
     """
     Test endpoint `GET-/job` of job-API with `keys` query parameter.
     """
-    client, db = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
 
     job_info = client.get(f"/job?token={util.DemoData.token1}").json
-    db_query = db.get_row("jobs", util.DemoData.token1).eval()
+    db_query = config.db.get_row("jobs", util.DemoData.token1).eval()
 
     # check general contents
     key_map = {
@@ -86,7 +79,9 @@ def test_get_keys(client_and_db):
             assert job_info[key] == value
         else:
             assert value is None
-    assert all(key in job_info for key in ["templateId", "workspaceId", "records"])
+    assert all(
+        key in job_info for key in ["templateId", "workspaceId", "records"]
+    )
 
     # test individual keys
     for key in [
@@ -122,18 +117,20 @@ def test_get_keys(client_and_db):
     }
 
 
-def test_get_bad(client_and_db):
+def test_get_bad(no_orchestra_testing_config):
     """Test endpoint `GET-/job` of job-API for bad token."""
-    client, _ = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
     response = client.get("/job?token=bad")
 
     assert response.status_code == 422
     assert response.mimetype == "text/plain"
 
 
-def test_get_unknown(client_and_db):
+def test_get_unknown(no_orchestra_testing_config):
     """Test endpoint `GET-/job` of job-API for unknown token."""
-    client, _ = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
     response = client.get(f"/job?token={uuid4()}")
 
     assert response.status_code == 404
@@ -141,7 +138,11 @@ def test_get_unknown(client_and_db):
 
 
 def test_post(
-    client_and_db, minimal_config, minimal_info, temp_folder, run_service
+    no_orchestra_testing_config,
+    minimal_config,
+    minimal_info,
+    temp_folder,
+    run_service,
 ):
     """Test endpoint `POST-/job` of job-API."""
 
@@ -154,16 +155,18 @@ def test_post(
             json.dumps(request.json), encoding="utf-8"
         )
         return jsonify(token), 201
+
     run_service(
         routes=[
             ("/process", _process, ["POST"]),
         ],
-        port=8087
+        port=8087,
     )
 
-    client, db = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
     minimal_config["template_id"] = minimal_config.pop("templateId")
-    db.insert("job_configs", minimal_config).eval()
+    config.db.insert("job_configs", minimal_config).eval()
     response = client.post(
         "/job",
         json={
@@ -186,13 +189,19 @@ def test_post(
     assert context["triggerType"] == TriggerType.MANUAL.value
 
     assert (
-        db.get_row("job_configs", minimal_config["id"]).eval()["latest_exec"]
+        config.db.get_row("job_configs", minimal_config["id"]).eval()[
+            "latest_exec"
+        ]
         == token["value"]
     )
 
 
 def test_post_test(
-    client_and_db, minimal_info, temp_folder, minimal_config, run_service
+    no_orchestra_testing_config,
+    minimal_info,
+    temp_folder,
+    minimal_config,
+    run_service,
 ):
     """
     Test endpoint `POST-/job/configure/test` of job-API.
@@ -206,14 +215,16 @@ def test_post_test(
             json.dumps(request.json), encoding="utf-8"
         )
         return jsonify(token), 201
+
     run_service(
         routes=[
             ("/process", _process, ["POST"]),
         ],
-        port=8087
+        port=8087,
     )
 
-    client, _ = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
     response = client.post(
         "/job-test", json=minimal_config | {"name": "test-job"}
     )
@@ -223,14 +234,18 @@ def test_post_test(
     assert response.json == token
 
     assert (temp_folder / file).exists()
-    assert json.loads((temp_folder / file).read_text(encoding="utf-8"))[
-        "process"
-    ]["to"] == "build_sip"
+    assert (
+        json.loads((temp_folder / file).read_text(encoding="utf-8"))[
+            "process"
+        ]["to"]
+        == "build_sip"
+    )
 
 
-def test_post_unknown_config(client_and_db, minimal_config):
+def test_post_unknown_config(no_orchestra_testing_config, minimal_config):
     """Test endpoint `POST-/job` of job-API for unknown config id."""
-    client, _ = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
     response = client.post("/job", json={"id": minimal_config["id"]})
 
     assert response.status_code == 404
@@ -238,14 +253,15 @@ def test_post_unknown_config(client_and_db, minimal_config):
     assert minimal_config["id"] in response.text
 
 
-def test_post_failed_submission(client_and_db, minimal_config):
+def test_post_failed_submission(no_orchestra_testing_config, minimal_config):
     """
     Test endpoint `POST-/job` of job-API for unavailable Job Processor
     service.
     """
-    client, db = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
     minimal_config["template_id"] = minimal_config.pop("templateId")
-    db.insert("job_configs", minimal_config).eval()
+    config.db.insert("job_configs", minimal_config).eval()
     response = client.post("/job", json={"id": minimal_config["id"]})
 
     assert response.status_code == 502
@@ -263,37 +279,49 @@ def test_post_failed_submission(client_and_db, minimal_config):
             200,
         ),
         (  # query for job config id empty
-            [f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"],
+            [
+                f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
+            ],
             f"?id={util.DemoData.job_config2}",
             [],
             200,
         ),
         (  # query for job config id non-empty
-            [f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"],
+            [
+                f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
+            ],
             f"?id={util.DemoData.job_config1}",
             [util.DemoData.token1],
             200,
         ),
         (  # sql injection via id
-            [f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"],
+            [
+                f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
+            ],
             f"?id={util.DemoData.job_config1}'",
             [],
             422,
         ),
         (  # query for status empty
-            [f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"],
+            [
+                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"
+            ],
             "?status=queued",
             [],
             200,
         ),
         (  # query for status non-empty
-            [f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"],
+            [
+                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"
+            ],
             "?status=running",
             [util.DemoData.token1],
             200,
         ),
         (  # query for status non-empty (multiple)
-            [f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"],
+            [
+                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"
+            ],
             "?status=queued,running",
             [util.DemoData.token1],
             200,
@@ -301,82 +329,107 @@ def test_post_failed_submission(client_and_db, minimal_config):
         (  # query for status non-empty (multiple)
             [
                 f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'queued')",
-                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token2}', 'running')"
+                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token2}', 'running')",
             ],
             "?status=queued,running",
             [util.DemoData.token1, util.DemoData.token2],
             200,
         ),
         (  # sql injection via status (ignored)
-            [f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'queued')",],
+            [
+                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'queued')",
+            ],
             "?status=queued'",
             [],
             422,
         ),
         (  # query with from empty
-            [f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",],
+            [
+                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",
+            ],
             "?from=2026",
             [],
             200,
         ),
         (  # query with from non-empty
-            [f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",],
+            [
+                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",
+            ],
             "?from=2025",
             [util.DemoData.token1],
             200,
         ),
         (  # sql injection via from (caught by handler)
-            [f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",],
+            [
+                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",
+            ],
             "?from=2025'",
             [],
             422,
         ),
         (  # query with to empty
-            [f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",],
+            [
+                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",
+            ],
             "?to=2026",
             [],
             200,
         ),
         (  # query with to non-empty
-            [f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",],
+            [
+                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",
+            ],
             "?to=2027",
             [util.DemoData.token1],
             200,
         ),
         (  # sql injection via to (caught by handler)
-            [f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",],
+            [
+                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",
+            ],
             "?to=2027'",
             [],
             422,
         ),
         (  # query by success empty
-            [f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",],
+            [
+                f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",
+            ],
             "?success=false",
             [],
             200,
         ),
         (  # query by success non-empty
-            [f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",],
+            [
+                f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",
+            ],
             "?success=true",
             [util.DemoData.token1],
             200,
         ),
         (  # sql injection via success (caught by handler)
-            [f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",],
+            [
+                f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",
+            ],
             "?success=true'",
             [],
             422,
         ),
     ],
 )
-def test_options(client_and_db, init_cmds, query, expected, status):
+def test_options(
+    no_orchestra_testing_config, init_cmds, query, expected, status
+):
     """Test endpoint `OPTIONS-/job` of job-API."""
-    client, db = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
 
-    db.custom_cmd("DELETE FROM records", clear_schema_cache=False).eval()
-    db.custom_cmd("DELETE FROM jobs", clear_schema_cache=False).eval()
+    config.db.custom_cmd(
+        "DELETE FROM records", clear_schema_cache=False
+    ).eval()
+    config.db.custom_cmd("DELETE FROM jobs", clear_schema_cache=False).eval()
     for cmd in init_cmds:
-        db.custom_cmd(cmd, clear_schema_cache=False).eval()
+        config.db.custom_cmd(cmd, clear_schema_cache=False).eval()
 
     response = client.options(f"/job{query}")
     assert response.status_code == status
@@ -388,12 +441,12 @@ def test_options(client_and_db, init_cmds, query, expected, status):
     "response",
     [
         Response("OK", mimetype="text/plain", status=200),
-        Response("not OK", mimetype="text/plain", status=502)
+        Response("not OK", mimetype="text/plain", status=502),
     ],
-    ids=["ok", "not-ok"]
+    ids=["ok", "not-ok"],
 )
 def test_abort(
-    response, client_and_db, minimal_info, run_service
+    response, no_orchestra_testing_config, minimal_info, run_service
 ):
     """Test endpoint `DELETE-/job` of job-API."""
 
@@ -402,13 +455,14 @@ def test_abort(
         routes=[
             ("/process", lambda: response, ["DELETE"]),
         ],
-        port=8087
+        port=8087,
     )
 
-    client, _ = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
     response = client.delete(
         f"/job?token={token['value']}",
-        json={"origin": "test-runner", "reason": "test abort"}
+        json={"origin": "test-runner", "reason": "test abort"},
     )
 
     assert response.status_code == response.status_code
@@ -426,13 +480,17 @@ def test_abort(
             400,
         ),
         (  # query for job config id empty
-            [f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"],
+            [
+                f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"
+            ],
             f"?id={util.DemoData.job_config2}",
             0,
             200,
         ),
         (  # query for job config id non-empty
-            [f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"],
+            [
+                f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"
+            ],
             f"?id={util.DemoData.job_config1}",
             1,
             200,
@@ -444,13 +502,17 @@ def test_abort(
             422,
         ),
         (  # query for job token empty
-            [f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"],
+            [
+                f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"
+            ],
             f"?token={util.DemoData.token2}",
             0,
             200,
         ),
         (  # query for job token non-empty
-            [f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"],
+            [
+                f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"
+            ],
             f"?token={util.DemoData.token1}",
             1,
             200,
@@ -462,13 +524,17 @@ def test_abort(
             422,
         ),
         (  # query by success empty
-            [f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"],
+            [
+                f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"
+            ],
             f"?token={util.DemoData.token1}&success=false",
             0,
             200,
         ),
         (  # query by success non-empty
-            [f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"],
+            [
+                f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"
+            ],
             f"?token={util.DemoData.token1}&success=true",
             1,
             200,
@@ -481,13 +547,18 @@ def test_abort(
         ),
     ],
 )
-def test_get_records(client_and_db, init_cmds, query, nexpected, status):
+def test_get_records(
+    no_orchestra_testing_config, init_cmds, query, nexpected, status
+):
     """Test endpoint `GET-/job/records` of job-API."""
-    client, db = client_and_db
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
 
-    db.custom_cmd("DELETE FROM records", clear_schema_cache=False).eval()
+    config.db.custom_cmd(
+        "DELETE FROM records", clear_schema_cache=False
+    ).eval()
     for cmd in init_cmds:
-        db.custom_cmd(cmd, clear_schema_cache=False).eval()
+        config.db.custom_cmd(cmd, clear_schema_cache=False).eval()
 
     response = client.get(f"/job/records{query}")
     assert response.status_code == status

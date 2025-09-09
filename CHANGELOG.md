@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.0.0] - 2025-09-09
+
+### Changed
+
+- migrated to dcm-common v4
+- migrated to job-processor API v2
+- **Breaking:** migrated to API v3
+
 ## [3.7.0] - 2025-08-22
 
 ### Changed

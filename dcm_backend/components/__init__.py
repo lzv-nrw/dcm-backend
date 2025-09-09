@@ -4,7 +4,7 @@ from .scheduler import Scheduler
 from .job_processor_adapter import JobProcessorAdapter
 
 __all__ = [
-    "RosettaAPIClient",
+    "RosettaAPIClient0",
     "ConfigurationController",
     "Scheduler",
     "JobProcessorAdapter",

@@ -5,7 +5,6 @@ Test module for the package `dcm-backend-sdk`.
 from time import sleep
 from uuid import uuid4
 from hashlib import md5
-from datetime import timedelta
 
 from flask import jsonify
 import pytest
@@ -18,12 +17,12 @@ from dcm_backend.models import JobConfig
 
 @pytest.fixture(name="sdk_testing_config")
 def _sdk_testing_config(testing_config, temp_folder):
-    testing_config.ORCHESTRATION_AT_STARTUP = True
-    testing_config.SCHEDULING_AT_STARTUP = True
-    testing_config.SQLITE_DB_FILE = temp_folder / str(uuid4())
-    testing_config.DB_ADAPTER_STARTUP_IMMEDIATELY = True
+    class SDKTestingConfig(testing_config):
+        testing_config.SCHEDULING_AT_STARTUP = True
+        testing_config.SQLITE_DB_FILE = temp_folder / str(uuid4())
+        testing_config.DB_ADAPTER_STARTUP_IMMEDIATELY = True
 
-    return testing_config
+    return SDKTestingConfig
 
 
 @pytest.fixture(name="app_and_db")
@@ -36,9 +35,7 @@ def _app_and_db(sdk_testing_config):
 def _default_sdk():
     return dcm_backend_sdk.DefaultApi(
         dcm_backend_sdk.ApiClient(
-            dcm_backend_sdk.Configuration(
-                host="http://localhost:8080"
-            )
+            dcm_backend_sdk.Configuration(host="http://localhost:8080")
         )
     )
 
@@ -47,9 +44,7 @@ def _default_sdk():
 def _ingest_sdk():
     return dcm_backend_sdk.IngestApi(
         dcm_backend_sdk.ApiClient(
-            dcm_backend_sdk.Configuration(
-                host="http://localhost:8080"
-            )
+            dcm_backend_sdk.Configuration(host="http://localhost:8080")
         )
     )
 
@@ -58,9 +53,7 @@ def _ingest_sdk():
 def _config_sdk():
     return dcm_backend_sdk.ConfigApi(
         dcm_backend_sdk.ApiClient(
-            dcm_backend_sdk.Configuration(
-                host="http://localhost:8080"
-            )
+            dcm_backend_sdk.Configuration(host="http://localhost:8080")
         )
     )
 
@@ -69,9 +62,7 @@ def _config_sdk():
 def _job_sdk():
     return dcm_backend_sdk.JobApi(
         dcm_backend_sdk.ApiClient(
-            dcm_backend_sdk.Configuration(
-                host="http://localhost:8080"
-            )
+            dcm_backend_sdk.Configuration(host="http://localhost:8080")
         )
     )
 
@@ -80,19 +71,19 @@ def _job_sdk():
 def _user_sdk():
     return dcm_backend_sdk.UserApi(
         dcm_backend_sdk.ApiClient(
-            dcm_backend_sdk.Configuration(
-                host="http://localhost:8080"
-            )
+            dcm_backend_sdk.Configuration(host="http://localhost:8080")
         )
     )
 
 
 def test_default_ping(
-    default_sdk: dcm_backend_sdk.DefaultApi, app_and_db, run_service
+    default_sdk: dcm_backend_sdk.DefaultApi, sdk_testing_config, run_service
 ):
     """Test default endpoint `/ping-GET`."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()), port=8080
+    )
 
     response = default_sdk.ping()
 
@@ -100,11 +91,15 @@ def test_default_ping(
 
 
 def test_default_status(
-    default_sdk: dcm_backend_sdk.DefaultApi, app_and_db, run_service
+    default_sdk: dcm_backend_sdk.DefaultApi, sdk_testing_config, run_service
 ):
     """Test default endpoint `/status-GET`."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
 
     response = default_sdk.get_status()
 
@@ -112,12 +107,15 @@ def test_default_status(
 
 
 def test_default_identify(
-    default_sdk: dcm_backend_sdk.DefaultApi, app_and_db, run_service,
-    sdk_testing_config
+    default_sdk: dcm_backend_sdk.DefaultApi,
+    sdk_testing_config,
+    run_service,
 ):
     """Test default endpoint `/identify-GET`."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()), port=8080
+    )
 
     response = default_sdk.identify()
 
@@ -128,7 +126,7 @@ def test_default_identify(
 
 def test_ingest_report(
     ingest_sdk: dcm_backend_sdk.IngestApi,
-    app_and_db,
+    sdk_testing_config,
     run_service,
     minimal_request_body,
     rosetta_stub,
@@ -138,7 +136,9 @@ def test_ingest_report(
     # run dummy Rosetta instance
     run_service(rosetta_stub, port=5050)
     # run backend
-    run_service(app_and_db["app"], port=8080, probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()), port=8080
+    )
 
     submission = ingest_sdk.ingest(minimal_request_body)
 
@@ -152,48 +152,53 @@ def test_ingest_report(
 
     report = ingest_sdk.get_report(token=submission.value)
     assert report.data.success
-    assert isinstance(
-        report.data.details.deposit.get("id"), str
-    )
-    assert (
-        report.data.details.deposit.get("status")
-        == "INPROCESS"
-    )
+    assert isinstance(report.data.details.deposit.get("id"), str)
+    assert report.data.details.deposit.get("status") == "INPROCESS"
 
     status = ingest_sdk.ingest_status(
         archive_id=minimal_request_body["ingest"]["archiveId"],
         deposit_id=report.data.details.deposit.get("id"),
     )
     assert status.success
-    assert status.details.deposit.get(
+    assert status.details.deposit.get("id") == report.data.details.deposit.get(
         "id"
-    ) == report.data.details.deposit.get("id")
-    assert status.details.sip.get(
-        "id"
-    ) == report.data.details.deposit.get("sip_id")
+    )
+    assert status.details.sip.get("id") == report.data.details.deposit.get(
+        "sip_id"
+    )
 
 
 def test_ingest_report_404(
-    ingest_sdk: dcm_backend_sdk.IngestApi, app_and_db, run_service
+    ingest_sdk: dcm_backend_sdk.IngestApi, sdk_testing_config, run_service
 ):
     """Test ingest endpoint `/report-GET` without previous submission."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()), port=8080
+    )
 
     with pytest.raises(dcm_backend_sdk.rest.ApiException) as exc_info:
         ingest_sdk.get_report(token="some-token")
     assert exc_info.value.status == 404
 
 
-def test_job_configure(config_sdk: dcm_backend_sdk.ConfigApi, app_and_db, run_service):
+def test_job_configure(
+    config_sdk: dcm_backend_sdk.ConfigApi, sdk_testing_config, run_service
+):
     """Test `/job/configure`-endpoints."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
 
     token = {"value": "abcdef-123", "expires": False}
     run_service(
-        routes=[("/process", lambda: (jsonify(token), 201), ["POST"]),],
-        port=8087
+        routes=[
+            ("/process", lambda: (jsonify(token), 201), ["POST"]),
+        ],
+        port=8087,
     )
 
     assert config_sdk.list_job_configs(
@@ -261,12 +266,18 @@ def test_job_configure(config_sdk: dcm_backend_sdk.ConfigApi, app_and_db, run_se
 
 
 def test_job(
-    config_sdk: dcm_backend_sdk.ConfigApi, job_sdk: dcm_backend_sdk.JobApi,
-    app_and_db, run_service
+    config_sdk: dcm_backend_sdk.ConfigApi,
+    job_sdk: dcm_backend_sdk.JobApi,
+    sdk_testing_config,
+    run_service,
 ):
     """Test `/job`-endpoints."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
 
     minimal_config = {
         "id": str(uuid4()),
@@ -279,9 +290,7 @@ def test_job(
         "host": "job-processor",
         "token": token,
         "args": {},
-        "progress": {
-            "status": "completed", "verbose": "-", "numeric": 100
-        },
+        "progress": {"status": "completed", "verbose": "-", "numeric": 100},
     }
     minimal_job = {
         "token": token["value"],
@@ -294,20 +303,26 @@ def test_job(
         "datetime_ended": "2024-01-01T00:01:00.000000+01:00",
         "report": report,
     }
+
     def _process():
-        app_and_db["db"].insert("jobs", minimal_job).eval()
+        sdk_testing_config().db.insert("jobs", minimal_job).eval()
         return jsonify(token), 201
+
     run_service(
-        routes=[("/process", _process, ["POST"]),], port=8087
+        routes=[
+            ("/process", _process, ["POST"]),
+        ],
+        port=8087,
     )
 
     # post job
+    db = sdk_testing_config().db
     config_info = config_sdk.set_job_config(minimal_config)
     assert config_info.id == minimal_config["id"]
     assert config_info.id in job_sdk.list_job_configs()
     assert (
         JobConfig.from_row(
-            app_and_db["db"].get_row("job_configs", config_info.id).eval()
+            db.get_row("job_configs", config_info.id).eval()
         ).json
         == minimal_config
     )
@@ -315,8 +330,7 @@ def test_job(
     job_token = job_sdk.run({"id": minimal_config["id"]})
     assert job_token.value == token["value"]
     assert any(
-        job_token.value in job["token"]
-        for job in app_and_db["db"].get_rows("jobs").eval()
+        job_token.value in job["token"] for job in db.get_rows("jobs").eval()
     )
 
     # list jobs
@@ -329,24 +343,25 @@ def test_job(
     assert info.token == token["value"]
 
     # run test-job
-    app_and_db["db"].delete("jobs", token["value"])
+    db.delete("jobs", token["value"])
     job_token = job_sdk.run_test_job(minimal_config)
     assert any(
-        job_token.value in job["token"]
-        for job in app_and_db["db"].get_rows("jobs").eval()
+        job_token.value in job["token"] for job in db.get_rows("jobs").eval()
     )
 
 
 def test_configure_user(
-    config_sdk: dcm_backend_sdk.ConfigApi, app_and_db, run_service
+    config_sdk: dcm_backend_sdk.ConfigApi, sdk_testing_config, run_service
 ):
     """Test `/user/configure`-endpoints."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
 
-    assert config_sdk.list_users(
-        group="admin"
-    ) == [util.DemoData.user0]
+    assert config_sdk.list_users(group="admin") == [util.DemoData.user0]
 
     minimal_config = {
         "username": "new-user",
@@ -392,12 +407,16 @@ def test_configure_user(
 
 def test_user_login(
     user_sdk: dcm_backend_sdk.UserApi,
-    app_and_db,
+    sdk_testing_config,
     run_service,
 ):
     """Test `POST-/user`-endpoint."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
 
     # successful login
     assert user_sdk.login(
@@ -417,21 +436,23 @@ def test_user_login(
     }
     # failed login
     try:
-        user_sdk.login(
-            {"username": "einstein", "password": "bad-pw"}
-        )
+        user_sdk.login({"username": "einstein", "password": "bad-pw"})
     except dcm_backend_sdk.exceptions.ApiException as exc_info:
         assert exc_info.status == 401
 
 
 def test_user_change_password(
     user_sdk: dcm_backend_sdk.UserApi,
-    app_and_db,
+    sdk_testing_config,
     run_service,
 ):
     """Test `POST-/user/password`-endpoint."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
 
     # change password
     new_password = md5(b"password").hexdigest()
@@ -450,11 +471,15 @@ def test_user_change_password(
 
 
 def test_configure_workspace(
-    config_sdk: dcm_backend_sdk.ConfigApi, app_and_db, run_service
+    config_sdk: dcm_backend_sdk.ConfigApi, sdk_testing_config, run_service
 ):
     """Test `/workspace/configure`-endpoints."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
 
     minimal_config = {
         "name": "New Workspace",
@@ -499,11 +524,15 @@ def test_configure_workspace(
 
 
 def test_configure_template(
-    config_sdk: dcm_backend_sdk.ConfigApi, app_and_db, run_service
+    config_sdk: dcm_backend_sdk.ConfigApi, sdk_testing_config, run_service
 ):
     """Test `/template/configure`-endpoints."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
 
     minimal_config = {
         "status": "ok",
@@ -549,11 +578,15 @@ def test_configure_template(
 def test_hotfolder_sources(
     config_sdk: dcm_backend_sdk.ConfigApi,
     run_service,
-    app_and_db,
+    sdk_testing_config,
 ):
     """Test `/template/hotfolder-sources`-endpoint."""
 
-    run_service(app_and_db["app"], probing_path="ready")
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
     response = config_sdk.get_hotfolder_sources()
     assert sorted(
         [src.model_dump(exclude_none=True)["id"] for src in response]

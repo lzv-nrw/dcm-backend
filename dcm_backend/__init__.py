@@ -11,11 +11,7 @@ from flask import Flask
 from argon2 import PasswordHasher
 from dcm_common import LoggingContext as Context, Logger
 from dcm_common.util import now
-from dcm_common.db import KeyValueStoreAdapter, SQLAdapter
-from dcm_common.orchestration import (
-    ScalableOrchestrator,
-    get_orchestration_controls,
-)
+from dcm_common.db import SQLAdapter
 from dcm_common.services import DefaultView, ReportView, APIResult
 from dcm_common.services import extensions as common_extensions
 
@@ -28,14 +24,12 @@ from dcm_backend.views import (
     UserView,
     get_scheduling_controls,
 )
-from dcm_backend.models import Report, JobConfig, TriggerType
+from dcm_backend.models import JobConfig, TriggerType
 from dcm_backend import extensions
 
 
 def app_factory(
     config: AppConfig,
-    queue: Optional[KeyValueStoreAdapter] = None,
-    registry: Optional[KeyValueStoreAdapter] = None,
     db: Optional[SQLAdapter] = None,
     as_process: bool = False,
     block: bool = False,
@@ -44,10 +38,6 @@ def app_factory(
     Returns a flask-app-object.
 
     config -- app config derived from `AppConfig`
-    queue -- queue adapter override
-             (default None; use `MemoryStore`)
-    registry -- registry adapter override
-                (default None; use `MemoryStore`)
     db -- database adapter
           (default None; uses `config.db`)
     as_process -- whether the app is intended to be run as process via
@@ -63,7 +53,7 @@ def app_factory(
     app = Flask(__name__)
     app.config.from_object(config)
 
-    # create Scheduler, Orchestrator, and View-classes
+    # create components and View-classes
     adapter = JobProcessorAdapter(
         db=db or config.db,
         url=config.JOB_PROCESSOR_HOST,
@@ -73,6 +63,7 @@ def app_factory(
 
     def scheduled_job_factory(job_config: JobConfig):
         """Factory for scheduler callbacks."""
+
         def _():
             result = APIResult()
             token = adapter.submit(
@@ -101,6 +92,7 @@ def app_factory(
                 "job_configs",
                 {"id": job_config.id_, "latest_exec": token.value},
             )
+
         return _
 
     scheduler = Scheduler(
@@ -108,18 +100,9 @@ def app_factory(
         zoneinfo=config.SCHEDULING_TIMEZONE,
     )
 
-    orchestrator = ScalableOrchestrator(
-        queue=queue or config.queue,
-        registry=registry or config.registry,
-        nprocesses=config.ORCHESTRATION_PROCESSES,
-    )
     password_hasher = PasswordHasher()
-    view_ingest = IngestView(
-        config=config,
-        report_type=Report,
-        orchestrator=orchestrator,
-        context=IngestView.NAME,
-    )
+    view_ingest = IngestView(config)
+    view_ingest.register_job_types()
     configuration_view = ConfigurationView(
         config,
         db or config.db,
@@ -140,13 +123,15 @@ def app_factory(
 
     # register extensions
     if config.ALLOW_CORS:
-        common_extensions.cors(app)
-    orchestrator_loader = common_extensions.orchestration_loader(
-        app, config, orchestrator, "Backend", as_process
+        app.extensions["cors"] = common_extensions.cors_loader(app)
+    app.extensions["orchestra"] = common_extensions.orchestra_loader(
+        app, config, config.worker_pool, "Backend", as_process
     )
-    scheduling_loader = extensions.scheduling_loader(scheduler)
-    db_loader = common_extensions.db_loader(app, config, config.db, as_process)
-    db_init_loader = extensions.db_init_loader(
+    app.extensions["scheduling"] = extensions.scheduling_loader(scheduler)
+    app.extensions["db"] = common_extensions.db_loader(
+        app, config, config.db, as_process
+    )
+    app.extensions["db_init"] = extensions.db_init_loader(
         app,
         config,
         db or config.db,
@@ -154,11 +139,11 @@ def app_factory(
         as_process,
         [
             common_extensions.ExtensionEventRequirement(
-                db_loader.ready, "database connection made"
+                app.extensions["db"].ready, "database connection made"
             )
         ],
     )
-    scheduling_init_loader = extensions.scheduling_init_loader(
+    app.extensions["scheduling_init"] = extensions.scheduling_init_loader(
         app,
         config,
         scheduler,
@@ -166,10 +151,10 @@ def app_factory(
         as_process,
         [
             common_extensions.ExtensionEventRequirement(
-                scheduling_loader.ready, "scheduling initialized"
+                app.extensions["scheduling"].ready, "scheduling initialized"
             ),
             common_extensions.ExtensionEventRequirement(
-                db_init_loader.ready, "database initialized"
+                app.extensions["db_init"].ready, "database initialized"
             ),
         ],
     )
@@ -178,17 +163,20 @@ def app_factory(
         """Define condition for readiness."""
         return (
             (
-                not config.ORCHESTRATION_AT_STARTUP
-                or orchestrator_loader.ready.is_set()
+                not config.ORCHESTRA_AT_STARTUP
+                or app.extensions["orchestra"].ready.is_set()
             )
             and (
                 not config.SCHEDULING_AT_STARTUP
                 or (
-                    scheduling_loader.ready.is_set()
-                    and scheduling_init_loader.ready.is_set()
+                    app.extensions["scheduling"].ready.is_set()
+                    and app.extensions["scheduling_init"].ready.is_set()
                 )
             )
-            and (db_loader.ready.is_set() and db_init_loader.ready.is_set())
+            and (
+                app.extensions["db"].ready.is_set()
+                and app.extensions["db_init"].ready.is_set()
+            )
         )
 
     # block until ready
@@ -197,21 +185,6 @@ def app_factory(
         while not ready() and time() - time0 < 10:
             sleep(0.01)
 
-    # register orchestrator-controls blueprint
-    if getattr(config, "TESTING", False) or config.ORCHESTRATION_CONTROLS_API:
-        app.register_blueprint(
-            get_orchestration_controls(
-                orchestrator,
-                orchestrator_loader.data,
-                orchestrator_settings={
-                    "interval": config.ORCHESTRATION_ORCHESTRATOR_INTERVAL,
-                },
-                daemon_settings={
-                    "interval": config.ORCHESTRATION_DAEMON_INTERVAL,
-                },
-            ),
-            url_prefix="/",
-        )
     # register scheduling-controls blueprint
     if getattr(config, "TESTING", False) or config.SCHEDULING_CONTROLS_API:
         app.register_blueprint(
@@ -225,9 +198,7 @@ def app_factory(
         url_prefix="/",
     )
     app.register_blueprint(view_ingest.get_blueprint(), url_prefix="/")
-    app.register_blueprint(
-        ReportView(config, orchestrator).get_blueprint(), url_prefix="/"
-    )
+    app.register_blueprint(ReportView(config).get_blueprint(), url_prefix="/")
     app.register_blueprint(configuration_view.get_blueprint(), url_prefix="/")
     app.register_blueprint(job_view.get_blueprint(), url_prefix="/")
     app.register_blueprint(user_view.get_blueprint(), url_prefix="/")

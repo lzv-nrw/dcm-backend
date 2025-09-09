@@ -37,44 +37,47 @@ def _user0_password():
     }
 
 
-@pytest.fixture(name="client_and_db")
-def _client_and_dbs(testing_config):
-    class TestingConfigWithoutUserActivation(testing_config):
+@pytest.fixture(name="user_testing_config")
+def _user_testing_config(no_orchestra_testing_config):
+    class TestingConfigWithoutUserActivation(no_orchestra_testing_config):
         REQUIRE_USER_ACTIVATION = False
 
-    config = TestingConfigWithoutUserActivation()
-    return app_factory(config, block=True).test_client(), config.db
+    return TestingConfigWithoutUserActivation
 
 
-def test_login(client_and_db, user0_credentials):
+def test_login(user_testing_config, user0_credentials):
     """Test endpoint `POST-/user` of user-API."""
-    client, db = client_and_db
+    config = user_testing_config()
+    client = app_factory(config, block=True).test_client()
     response = client.post("/user", json=user0_credentials)
 
     assert response.status_code == 200
     assert response.mimetype == "application/json"
     assert response.json == UserConfig.from_row(
-        db.get_row("user_configs", util.DemoData.user0).eval()
+        config.db.get_row("user_configs", util.DemoData.user0).eval()
     ).json | {"groups": [{"id": "admin"}]}
 
 
-def test_login_rehash(client_and_db, user0_credentials):
+def test_login_rehash(user_testing_config, user0_credentials):
     """
     Test endpoint `POST-/user` of user-API regarding secret-re-hashing.
     """
-    client, db = client_and_db
+    config = user_testing_config()
+    client = app_factory(config, block=True).test_client()
     assert client.post("/user", json=user0_credentials).status_code == 200
 
     # replace existing hash in db by one with different settings
-    config = db.get_rows(
+    user_config = config.db.get_rows(
         "user_configs", user0_credentials["username"], "username", ["id"]
     ).eval()[0]
-    secrets = db.get_rows("user_secrets", config["id"], "user_id").eval()[0]
-    db.update(
+    secrets = config.db.get_rows(
+        "user_secrets", user_config["id"], "user_id"
+    ).eval()[0]
+    config.db.update(
         "user_secrets",
         {
             "id": secrets["id"],
-            "user_id": config["id"],
+            "user_id": user_config["id"],
             "password": PasswordHasher(time_cost=1).hash(
                 user0_credentials["password"]
             ),
@@ -85,7 +88,9 @@ def test_login_rehash(client_and_db, user0_credentials):
     assert client.post("/user", json=user0_credentials).status_code == 200
 
     # check for re-hash
-    secrets2 = db.get_rows("user_secrets", config["id"], "user_id").eval()[0]
+    secrets2 = config.db.get_rows(
+        "user_secrets", user_config["id"], "user_id"
+    ).eval()[0]
     assert secrets["password"] != secrets2["password"]
 
 
@@ -97,20 +102,22 @@ def test_login_rehash(client_and_db, user0_credentials):
     ],
     ids=["bad-user", "bad-password"],
 )
-def test_login_failed(credentials, client_and_db, user0_credentials):
+def test_login_failed(credentials, user_testing_config, user0_credentials):
     """Test endpoint `POST-/user` of user-API with bad credentials."""
-    client, _ = client_and_db
+    config = user_testing_config()
+    client = app_factory(config, block=True).test_client()
     response = client.post("/user", json=user0_credentials | credentials)
 
     assert response.status_code == 401
     assert response.mimetype == "text/plain"
 
 
-def test_new_user_then_login(client_and_db):
+def test_new_user_then_login(user_testing_config):
     """
     Test endpoints `POST-/user/configure` and `POST-/user` of user-API.
     """
-    client, _ = client_and_db
+    config = user_testing_config()
+    client = app_factory(config, block=True).test_client()
 
     # user does not exist
     assert (
@@ -145,9 +152,10 @@ def test_new_user_then_login(client_and_db):
     )
 
 
-def test_user_change_password(client_and_db, user0_credentials):
+def test_user_change_password(user_testing_config, user0_credentials):
     """Test endpoint `POST-/user/password` of user-API."""
-    client, _ = client_and_db
+    config = user_testing_config()
+    client = app_factory(config, block=True).test_client()
 
     # validate correct credentials
     assert client.post("/user", json=user0_credentials).status_code == 200
@@ -169,11 +177,12 @@ def test_user_change_password(client_and_db, user0_credentials):
     assert client.post("/user", json=new_credentials).status_code == 200
 
 
-def test_new_user_and_login_with_user_activation(testing_config):
+def test_new_user_and_login_with_user_activation(user_testing_config):
     """
     Test creation of new users with user account activation requirement.
     """
-    class TestingConfigWithUserActivation(testing_config):
+
+    class TestingConfigWithUserActivation(user_testing_config):
         REQUIRE_USER_ACTIVATION = True
 
     config = TestingConfigWithUserActivation()

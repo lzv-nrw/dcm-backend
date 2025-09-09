@@ -4,17 +4,19 @@ Ingest View-class definition
 
 from typing import Optional
 import json
+import os
+from uuid import uuid4
 
-from flask import Blueprint, jsonify, Response
+from flask import Blueprint, jsonify, Response, request
 from data_plumber_http.decorators import flask_handler, flask_args, flask_json
 from data_plumber_http.settings import Responses
 from dcm_common import LoggingContext as Context
-from dcm_common.orchestration import JobConfig, Job
+from dcm_common.orchestra import JobConfig, JobContext, JobInfo
 from dcm_common import services
 
-from dcm_backend.config import AppConfig
 from dcm_backend import handlers
 from dcm_backend.models import (
+    Report,
     IngestConfig,
     RosettaTarget,
     ArchiveAPI,
@@ -29,8 +31,10 @@ class IngestView(services.OrchestratedView):
 
     NAME = "ingest"
 
-    def __init__(self, config: AppConfig, *args, **kwargs) -> None:
-        super().__init__(config, *args, **kwargs)
+    def register_job_types(self):
+        self.config.worker_pool.register_job_type(
+            self.NAME, self.ingest, Report
+        )
 
     def configure_bp(self, bp: Blueprint, *args, **kwargs) -> None:
         @bp.route("/ingest", methods=["GET"])
@@ -93,63 +97,45 @@ class IngestView(services.OrchestratedView):
         def ingest(
             ingest: IngestConfig,
             token: Optional[str] = None,
-            callback_url: Optional[str] = None
+            callback_url: Optional[str] = None,
         ):
             """Submit dir for ingesting in the archive system."""
             try:
-                token = self.orchestrator.submit(
-                    JobConfig(
-                        request_body={
-                            "ingest": ingest.json,
-                            "callback_url": callback_url
-                        },
-                        context=self.NAME
+                token = self.config.controller.queue_push(
+                    token or str(uuid4()),
+                    JobInfo(
+                        JobConfig(
+                            self.NAME,
+                            original_body=request.json,
+                            request_body={
+                                "ingest": ingest.json,
+                                "callback_url": callback_url,
+                            },
+                        ),
+                        report=Report(
+                            host=request.host_url, args=request.json
+                        ),
                     ),
-                    token=token,
                 )
-            except ValueError as exc_info:
+            # pylint: disable=broad-exception-caught
+            except Exception as exc_info:
                 return Response(
                     f"Submission rejected: {exc_info}",
                     mimetype="text/plain",
-                    status=400,
+                    status=500,
                 )
 
             return jsonify(token.json), 201
 
         self._register_abort_job(bp, "/ingest")
 
-    def get_job(self, config: JobConfig) -> Job:
-        return Job(
-            cmd=lambda push, data: self.ingest(
-                push, data, IngestConfig.from_json(
-                    config.request_body["ingest"]
-                )
-            ),
-            hooks={
-                "startup": services.default_startup_hook,
-                "success": services.default_success_hook,
-                "fail": services.default_fail_hook,
-                "completion": services.termination_callback_hook_factory(
-                    config.request_body.get("callback_url", None),
-                )
-            },
-            name="Backend"
+    def ingest(self, context: JobContext, info: JobInfo):
+        """Job instructions for the '/ingest' endpoint."""
+        ingest_config = IngestConfig.from_json(
+            info.config.request_body["ingest"]
         )
+        info.report.log.set_default_origin("Backend")
 
-    def ingest(
-        self, push, report, ingest_config: IngestConfig
-    ):
-        """
-        Job instructions for the '/ingest' endpoint.
-
-        Orchestration standard-arguments:
-        push -- (orchestration-standard) push `report` to host process
-        report -- (orchestration-standard) common report-object shared
-                  via `push`
-
-        Keyword arguments:
-        ingest_config -- an `IngestConfig`-config
-        """
         # TODO: validate target and initialize correct model
         # get configuration from api
 
@@ -168,51 +154,65 @@ class IngestView(services.OrchestratedView):
         )
         if validation.last_status == Responses().GOOD.status:
             self._ingest_rosetta(
-                push,
-                report,
+                context,
+                info,
                 ingest_config,
                 validation.data.value,
             )
         else:
             self._handle_bad_target(
-                push, report, validation.last_record, ArchiveAPI.ROSETTA_REST_V0
+                context,
+                info,
+                validation.last_record,
+                ArchiveAPI.ROSETTA_REST_V0,
             )
 
+        # make callback; rely on _run_callback to push progress-update
+        info.report.progress.complete()
+        self._run_callback(
+            context, info, info.config.request_body.get("callback_url")
+        )
+
     def _handle_bad_target(
-        self, push, report, record, archive_api: ArchiveAPI
+        self,
+        context: JobContext,
+        info: JobInfo,
+        record,
+        archive_api: ArchiveAPI,
     ) -> None:
         """Logs an ERROR that describes the problem with the target."""
-        report.log.log(
+        info.report.log.log(
             Context.ERROR,
             body=(
                 "Ingest failed. Supplied target information incompatible with "
                 + f"archive-type '{archive_api.value}': {record.message}."
             ),
         )
-        report.success = False
-        push()
+        info.report.success = False
+        context.push()
 
     def _ingest_rosetta(
-        self, push, report, _, target: RosettaTarget
+        self, context: JobContext, info: JobInfo, _, target: RosettaTarget
     ):
         # log
-        report.progress.verbose = (
+        info.report.progress.verbose = (
             f"requesting ingest of '{target.subdirectory}' via "
             + f"'{ArchiveAPI.ROSETTA_REST_V0.value}'-client"
         )
-        report.log.log(
+        info.report.log.log(
             Context.EVENT,
             body=(
                 f"Attempting ingest of '{target.subdirectory}' using "
-                + f"'{ArchiveAPI.ROSETTA_REST_V0.value}'-client.")
+                + f"'{ArchiveAPI.ROSETTA_REST_V0.value}'-client."
+            ),
         )
-        push()
+        context.push()
 
         # create archive_controller
         ac = archive_controller.RosettaAPIClient0(
             auth=self.config.ROSETTA_AUTH_FILE,
             url=self.config.ARCHIVE_API_BASE_URL,
-            proxies=self.config.ARCHIVE_API_PROXY
+            proxies=self.config.ARCHIVE_API_PROXY,
         )
 
         # run deposit
@@ -224,70 +224,70 @@ class IngestView(services.OrchestratedView):
         )
 
         # eval results of first stage (deposit)
-        report.log.merge(deposit.log)
-        report.data.success = (
+        info.report.log.merge(deposit.log)
+        info.report.data.success = (
             deposit.success and deposit.data.get("id") is not None
         )
-        report.data.details = RosettaResult(deposit.data)
-        push()
+        info.report.data.details = RosettaResult(deposit.data)
+        context.push()
 
-        if report.data.success:
-            report.log.log(
+        if info.report.data.success:
+            info.report.log.log(
                 Context.INFO,
                 body=(
                     f"Ingest of '{target.subdirectory}' successful. Assigned "
                     + f"deposit id: {deposit.data['id']}."
-                )
+                ),
             )
         else:
-            report.log.log(
+            info.report.log.log(
                 Context.INFO,
                 body=(
                     f"Ingest of '{target.subdirectory}' not successful. "
                     + f"Archive returned: {json.dumps(deposit.data)}"
                 ),
             )
-            push()
+            context.push()
             return
 
         if deposit.data.get("sip_id") is None:
             # this does not change `success` for now since we have no
             # guarantee from the documentation that the sip is already created
             # at this point
-            report.log.log(
+            info.report.log.log(
                 Context.INFO,
                 body=(
                     "Missing sip-id, unable to collect sip-data for deposit "
                     + f"'{deposit.data['id']}'."
                 ),
             )
-            push()
+            context.push()
             return
 
         # continue with second stage (collect sip information)
-        report.progress.verbose = (
+        info.report.progress.verbose = (
             f"requesting sip for deposit '{deposit.data['id']}'"
         )
-        report.log.log(
+        info.report.log.log(
             Context.EVENT,
             body=(
                 f"Attempting to retrieve sip '{deposit.data['sip_id']}' "
                 + f"associated with deposit '{deposit.data['id']}'."
-            )
+            ),
         )
-        push()
+        context.push()
 
         sip = ac.get_sip(deposit.data["sip_id"])
 
         # eval results of second stage (sip)
-        report.log.merge(sip.log)
-        report.data.details.sip = sip.data
+        info.report.log.merge(sip.log)
+        info.report.data.details.sip = sip.data
         if sip.data is None:
-            report.log.log(
+            info.report.log.log(
                 Context.INFO,
                 body=(
                     f"No sip collected for deposit '{deposit.data['id']}' and "
                     + f"sip id '{deposit.data['sip_id']}'."
                 ),
             )
-        push()
+        context.push()

@@ -7,7 +7,7 @@ from pathlib import Path
 from copy import deepcopy
 
 from dcm_common.db import SQLAdapter
-from dcm_common.models.report import Status
+from dcm_common.orchestra import Status
 from dcm_common.services import APIResult, ServiceAdapter
 import dcm_job_processor_sdk
 
@@ -42,6 +42,9 @@ class JobProcessorAdapter(ServiceAdapter):
 
     def _get_api_endpoint(self):
         return self._api_client.process
+
+    def _get_abort_endpoint(self):
+        return self._api_client.abort
 
     @staticmethod
     def build_request_body_import_ies(

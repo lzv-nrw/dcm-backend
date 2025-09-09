@@ -7,17 +7,17 @@ import json
 
 import yaml
 from dcm_common.services import OrchestratedAppConfig, DBConfig
+from dcm_common.orchestra import dillignore
 import dcm_database
 import dcm_backend_api
 
 
+@dillignore("controller", "worker_pool", "db")
 class AppConfig(OrchestratedAppConfig, DBConfig):
     """
     Configuration for the dcm-backend-app.
     """
 
-    # disable parallel-deployment
-    ORCHESTRATION_ABORT_NOTIFICATIONS = False
     # include this in config for compatible with common orchestration-
     # app extension
     FS_MOUNT_POINT = Path.cwd()

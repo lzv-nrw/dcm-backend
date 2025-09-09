@@ -17,6 +17,7 @@ def test_scheduler_initialization(with_scheduled_config, testing_config):
     class ThisTestingConfig(testing_config):
         DB_GENERATE_DEMO = with_scheduled_config
         SCHEDULING_AT_STARTUP = True
+        ORCHESTRA_AT_STARTUP = False
 
     client = app_factory(ThisTestingConfig(), block=True).test_client()
     if with_scheduled_config:

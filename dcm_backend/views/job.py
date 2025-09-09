@@ -13,7 +13,6 @@ from dcm_common.db import SQLAdapter
 from dcm_common.db.sql.adapter.interface import _Statement
 from dcm_common import util, services
 from dcm_common.services.views.interface import View
-from dcm_common.orchestration import ChildJob
 
 from dcm_backend.config import AppConfig
 from dcm_backend.models import JobConfig, TriggerType, Record, JobInfo
@@ -451,14 +450,17 @@ class JobView(View):
             reason: Optional[str] = None,
         ):
             """Stop job associated with `token`."""
-            ok, msg = ChildJob(
-                self.processor_abort_url, token=token
-            ).abort(origin=origin, reason=reason)
-            if not ok:
+            try:
+                self.adapter.abort(
+                    None,
+                    args=(token, {"origin": origin, "reason": reason})
+                )
+            # pylint: disable=broad-exception-caught
+            except Exception as exc_info:
                 return Response(
-                    "Error while aborting child at "
+                    "Error while aborting job at "
                     + f"'{self.processor_abort_url}' using token '{token}': "
-                    + msg,
+                    + str(exc_info),
                     mimetype="text/plain", status=502
                 )
             return Response(
