@@ -179,7 +179,13 @@ class UserSecrets(DataModel):
     """Data model for user secrets."""
     id_: Optional[str] = None
     user_id: Optional[str] = None
-    password: str
+
+    # hashed and encoded password (this is the value stored in the database)
+    password: Optional[str] = None
+
+    # introduced for alternative user-activation where the actual password
+    # needs to be returned via the API
+    password_raw: Optional[str] = None
 
     @property
     def row(self) -> dict:

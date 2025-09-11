@@ -12,21 +12,6 @@ from dcm_backend.models import UserConfig
 from dcm_backend import app_factory, util
 
 
-class StdOutReader:
-    def __init__(self):
-        self.lines = []
-        self._stdout = sys.stdout
-        self._stringio = StringIO()
-
-    def __enter__(self):
-        sys.stdout = self._stringio
-        return self
-
-    def __exit__(self, *args):
-        sys.stdout = self._stdout
-        self.lines = self._stringio.getvalue().splitlines()
-
-
 @pytest.fixture(name="user0_credentials")
 def _user0_password():
     return {
@@ -128,16 +113,13 @@ def test_new_user_then_login(user_testing_config):
         == 401
     )
 
-    # create new user (and capture stdout for initial password)
-    with StdOutReader() as output:
-        assert (
-            client.post(
-                "/user/configure",
-                json={"username": "newuser", "email": "a@b.c"},
-            ).status_code
-            == 200
-        )
-    password = re.findall(r"\(password=(.*)\)", output.lines[0])[0]
+    # create new user
+    response = client.post(
+        "/user/configure",
+        json={"username": "newuser", "email": "a@b.c"},
+    )
+    assert response.status_code == 200
+    assert not response.json["requiresActivation"]
 
     # attempt login again
     assert (
@@ -145,7 +127,9 @@ def test_new_user_then_login(user_testing_config):
             "/user",
             json={
                 "username": "newuser",
-                "password": md5(password.encode(encoding="utf-8")).hexdigest(),
+                "password": md5(
+                    response.json.get("secret").encode(encoding="utf-8")
+                ).hexdigest(),
             },
         ).status_code
         == 200
@@ -189,15 +173,13 @@ def test_new_user_and_login_with_user_activation(user_testing_config):
     client = app_factory(config, block=True).test_client()
 
     # create new user (and capture stdout for initial password)
-    with StdOutReader() as output:
-        assert (
-            client.post(
-                "/user/configure",
-                json={"username": "newuser", "email": "a@b.c"},
-            ).status_code
-            == 200
-        )
-    password = re.findall(r"\(password=(.*)\)", output.lines[0])[0]
+    response = client.post(
+        "/user/configure",
+        json={"username": "newuser", "email": "a@b.c"},
+    )
+    assert response.status_code == 200
+    assert response.json["requiresActivation"]
+    user_id = response.json["id"]
 
     # attempt login
     assert (
@@ -205,20 +187,72 @@ def test_new_user_and_login_with_user_activation(user_testing_config):
             "/user",
             json={
                 "username": "newuser",
-                "password": md5(password.encode(encoding="utf-8")).hexdigest(),
+                "password": md5(
+                    response.json.get("secret").encode(encoding="utf-8")
+                ).hexdigest(),
             },
         ).status_code
         == 403
     )
 
-    # change password
+    # set password
     new_password = md5(b"another-pw").hexdigest()
     assert (
         client.put(
             "/user/password",
             json={
                 "username": "newuser",
-                "password": md5(password.encode(encoding="utf-8")).hexdigest(),
+                "password": md5(
+                    response.json.get("secret").encode(encoding="utf-8")
+                ).hexdigest(),
+                "newPassword": new_password,
+            },
+        ).status_code
+        == 200
+    )
+    # attempt login again
+    assert (
+        client.post(
+            "/user", json={"username": "newuser", "password": new_password}
+        ).status_code
+        == 200
+    )
+
+    # revoke and re-activate
+    response = client.delete(
+        f"/user/configure/secrets?id={user_id}",
+    )
+    assert response.status_code == 200
+    assert response.json["requiresActivation"]
+    # previous password
+    assert (
+        client.post(
+            "/user", json={"username": "newuser", "password": new_password}
+        ).status_code
+        == 401
+    )
+    # new password (does not work because not activated)
+    assert (
+        client.post(
+            "/user",
+            json={
+                "username": "newuser",
+                "password": md5(
+                    response.json.get("secret").encode(encoding="utf-8")
+                ).hexdigest(),
+            },
+        ).status_code
+        == 403
+    )
+    # set password again
+    assert (
+        client.put(
+            "/user/password",
+            json={
+                "username": "newuser",
+                "password": md5(
+                    response.json.get("secret").encode(encoding="utf-8")
+                ).hexdigest(),
                 "newPassword": new_password,
             },
         ).status_code

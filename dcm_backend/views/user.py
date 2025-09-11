@@ -185,6 +185,11 @@ class UserView(View):
                 t.add_update("user_secrets", secrets.row)
 
                 # update user status
+                if config.status == "inactive":
+                    print(
+                        f"Activating user '{credentials.username}'.",
+                        file=sys.stderr,
+                    )
                 config.status = "ok"
                 t.add_update("user_configs", config.row)
             t.result.eval("changing user password")

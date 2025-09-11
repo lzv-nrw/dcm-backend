@@ -492,6 +492,8 @@ def test_post_user(no_orchestra_testing_config, minimal_user_config):
     assert response.status_code == 200
     assert response.mimetype == "application/json"
 
+    assert response.json["requiresActivation"]
+
     written_config = config.db.get_row(
         "user_configs", response.json["id"]
     ).eval()

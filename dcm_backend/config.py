@@ -59,10 +59,6 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
     REQUIRE_USER_ACTIVATION = (
         (int(os.environ.get("REQUIRE_USER_ACTIVATION") or 1)) == 1
     )
-    USER_ACTIVATION_URL_FMT = os.environ.get(
-        "USER_ACTIVATION_URL_FMT",
-        "ERROR: activation url-format not configured (password={password})",
-    )
 
     # ------ SCHEDULING ------
     SCHEDULING_CONTROLS_API = (
@@ -134,7 +130,6 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
         }
         settings["user"] = {
             "user_activation": self.REQUIRE_USER_ACTIVATION,
-            "activation_url_fmt": self.USER_ACTIVATION_URL_FMT,
         }
 
         self.CONTAINER_SELF_DESCRIPTION["configuration"]["services"] = {

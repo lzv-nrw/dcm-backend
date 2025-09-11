@@ -93,7 +93,6 @@ Service-specific environment variables are
 
 ### Users
 * `REQUIRE_USER_ACTIVATION` [DEFAULT 1]: whether new users are required to set password before login
-* `USER_ACTIVATION_URL_FMT` [DEFAULT "ERROR: ..."]: python format-string containing `..{password}..` as key; used to format user-activation urls
 
 ### Scheduling
 * `SCHEDULING_CONTROLS_API` [DEFAULT 0] whether the scheduling-api is available

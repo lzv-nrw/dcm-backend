@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.1.0] - 2025-09-11
+
+### Changed
+
+- updated response body of POST-/user/configure to include the user activation-secret (this enables new user-activation strategy)
+
+### Added
+
+- implemented new endpoint to revoke user secrets/activation status
+
+### Removed
+
+- removed unused variable `USER_ACTIVATION_URL_FMT`
+
 ## [4.0.0] - 2025-09-09
 
 ### Changed

@@ -50,9 +50,12 @@ test_user_config_json = get_model_serialization_test(
 test_user_secrets_json = get_model_serialization_test(
     UserSecrets,
     (
-        ((), {"password": "c"}),
-        ((), {"id_": "a", "user_id": "b", "password": "c"}),
-    )
+        ((), {}),
+        (
+            (),
+            {"id_": "a", "user_id": "b", "password": "c", "password_raw": "d"},
+        ),
+    ),
 )
 
 

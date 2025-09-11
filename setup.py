@@ -2,7 +2,7 @@ from setuptools import setup
 
 
 setup(
-    version="4.0.0",
+    version="4.1.0",
     name="dcm-backend",
     description="flask app for dcm-backend-containers",
     author="LZV.nrw",
@@ -15,7 +15,7 @@ setup(
         "data-plumber-http>=1.0.0,<2",
         "dcm-common[services, db, orchestra]>=4.0.0,<5",
         "dcm-database>=1.4.0,<2",
-        "dcm-backend-api>=3.0.0,<4",
+        "dcm-backend-api>=3.1.0,<4",
         "dcm-job-processor-sdk>=2.0.0,<3",
     ],
     packages=[

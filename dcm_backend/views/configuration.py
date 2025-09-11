@@ -3,6 +3,7 @@ Configuration View-class definition
 """
 
 from typing import Optional
+import sys
 from hashlib import md5
 from uuid import uuid4
 
@@ -318,7 +319,8 @@ class ConfigurationView(View):
             if query["username"] != config.username:
                 print(
                     f"Changed username for '{config.id_}' from "
-                    + f"'{query['username']}' to '{config.username}'."
+                    + f"'{query['username']}' to '{config.username}'.",
+                    file=sys.stderr,
                 )
 
             # validate workspaces for group memberships
@@ -359,7 +361,8 @@ class ConfigurationView(View):
             if config.status == "deleted":
                 print(
                     f"Deleted secret for user '{config.username}' "
-                    + f"({config.id_})."
+                    + f"({config.id_}).",
+                    file=sys.stderr,
                 )
                 self.db.delete("user_secrets", config.id_, "user_id").eval(
                     f"deleting secret for user '{config.username}'"
@@ -391,15 +394,14 @@ class ConfigurationView(View):
                 + " 'config'."
             )
 
-        # generate password if needed
-        if password is None:
-            _password = str(uuid4())
-        else:
-            _password = password
-
         user = UserConfigWithSecrets(
             UserConfig(username=username) if config is None else config,
-            UserSecrets(user_id=config.id_, password=_password)
+            # generate password if needed
+            (
+                UserSecrets(user_id=config.id_, password_raw=str(uuid4()))
+                if password is None
+                else UserSecrets(user_id=config.id_, password_raw=password)
+            ),
         )
 
         # update config
@@ -408,16 +410,8 @@ class ConfigurationView(View):
         else:
             user.config.status = "inactive"
 
-        if password is None:
-            # TODO, send email..
-            print(
-                "Set initial password at: "
-                + self.config.USER_ACTIVATION_URL_FMT.format(
-                    password=_password
-                )
-            )
         user.secrets.password = self.password_hasher.hash(
-            md5(_password.encode(encoding="utf-8")).hexdigest()
+            md5(user.secrets.password_raw.encode(encoding="utf-8")).hexdigest()
         )
 
         return user
@@ -500,7 +494,95 @@ class ConfigurationView(View):
                     )
             t.result.eval("creating user")
 
-            return (jsonify({"id": user.config.id_}), 200)
+            return (
+                jsonify(
+                    {
+                        "id": user.config.id_,
+                        "secret": user.secrets.password_raw,
+                        "requiresActivation": self.config.REQUIRE_USER_ACTIVATION,
+                    }
+                ),
+                200,
+            )
+
+    def _delete_user_secrets(self, bp: Blueprint):
+
+        @bp.route(
+            "/user/configure/secrets",
+            methods=["DELETE"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # process query
+            handler=handlers.get_config_id_handler(True),
+            json=flask_args,
+        )
+        @flask_handler(  # process body
+            handler=services.no_args_handler,
+            json=flask_json,
+        )
+        def delete_user_secrets(id_: str):
+            """Reset user secrets/activation."""
+            # try to load from db
+            config_query = self.db.get_row(
+                "user_configs", id_, cols=["id", "username", "status"]
+            ).eval()
+            if config_query is None:
+                return Response(
+                    f"User '{id_}' does not exist.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+            secret_query = self.db.get_rows(
+                "user_secrets", id_, "user_id", cols=["id"]
+            ).eval()
+            if secret_query is None or len(secret_query) != 1:
+                return Response(
+                    f"User '{id_}' is in a broken state (missing secrets).",
+                    mimetype="text/plain",
+                    status=500,
+                )
+
+            # log changes
+            print(
+                f"Resetting user secrets for '{config_query['username']}'.",
+                file=sys.stderr,
+            )
+            if (
+                self.config.REQUIRE_USER_ACTIVATION
+                and config_query["status"] != "inactive"
+            ):
+                print(
+                    "Resetting activation status for "
+                    + f"'{config_query['username']}'.",
+                    file=sys.stderr,
+                )
+
+            # create new user secrets
+            new_user = self.create_user(
+                config=UserConfig.from_row(config_query)
+            )
+
+            # insert in database
+            with self.db.new_transaction() as t:
+                t.add_update(
+                    "user_configs",
+                    {"id": id_, "status": new_user.config.status},
+                )
+                t.add_update(
+                    "user_secrets",
+                    {"password": new_user.secrets.password} | secret_query[0],
+                )
+            t.result.eval("updating user and secrets")
+
+            return (
+                jsonify(
+                    {
+                        "secret": new_user.secrets.password_raw,
+                        "requiresActivation": self.config.REQUIRE_USER_ACTIVATION,
+                    }
+                ),
+                200,
+            )
 
     def _delete_user_config(self, bp: Blueprint):
         @bp.route(
@@ -813,6 +895,7 @@ class ConfigurationView(View):
         self._get_user_config(bp)
         self._put_user_config(bp)
         self._post_user_config(bp)
+        self._delete_user_secrets(bp)
         self._delete_user_config(bp)
         self._list_workspaces(bp)
         self._get_workspace_config(bp)

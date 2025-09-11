@@ -441,12 +441,48 @@ def test_user_login(
         assert exc_info.status == 401
 
 
+def test_revoke_user_secrets_activation(
+    user_sdk: dcm_backend_sdk.UserApi,
+    config_sdk: dcm_backend_sdk.ConfigApi,
+    sdk_testing_config,
+    run_service,
+):
+    """Test `DELETE-/user/configure/secrets`-endpoint."""
+
+    run_service(
+        from_factory=lambda: app_factory(sdk_testing_config()),
+        port=8080,
+        probing_path="ready",
+    )
+    new_secrets = config_sdk.revoke_user_secrets(util.DemoData.user1)
+    try:
+        user_sdk.login(
+            {
+                "username": "einstein",
+                "password": md5(b"relativity").hexdigest(),
+            }
+        )
+    except dcm_backend_sdk.exceptions.ApiException as exc_info:
+        assert exc_info.status == 401
+    try:
+        user_sdk.login(
+            {
+                "username": "einstein",
+                "password": md5(
+                    new_secrets.secret.encode(encoding="utf-8")
+                ).hexdigest(),
+            }
+        )
+    except dcm_backend_sdk.exceptions.ApiException as exc_info:
+        assert exc_info.status == 403
+
+
 def test_user_change_password(
     user_sdk: dcm_backend_sdk.UserApi,
     sdk_testing_config,
     run_service,
 ):
-    """Test `POST-/user/password`-endpoint."""
+    """Test `PUT-/user/password`-endpoint."""
 
     run_service(
         from_factory=lambda: app_factory(sdk_testing_config()),
