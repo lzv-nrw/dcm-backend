@@ -11,16 +11,14 @@ from dcm_common.orchestra import dillignore
 import dcm_database
 import dcm_backend_api
 
+from dcm_backend import util
+
 
 @dillignore("controller", "worker_pool", "db")
 class AppConfig(OrchestratedAppConfig, DBConfig):
     """
     Configuration for the dcm-backend-app.
     """
-
-    # include this in config for compatible with common orchestration-
-    # app extension
-    FS_MOUNT_POINT = Path.cwd()
 
     # ------ EXTENSIONS ------
     DB_INIT_STARTUP_INTERVAL = 1.0
@@ -60,6 +58,9 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
         (int(os.environ.get("REQUIRE_USER_ACTIVATION") or 1)) == 1
     )
 
+    # ------ TEMPLATES ------
+    HOTFOLDER_SRC = os.environ.get("HOTFOLDER_SRC", "[]")
+
     # ------ SCHEDULING ------
     SCHEDULING_CONTROLS_API = (
         (int(os.environ.get("SCHEDULING_CONTROLS_API") or 0)) == 1
@@ -87,6 +88,17 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
         API_DOCUMENT.read_text(encoding="utf-8"),
         Loader=yaml.SafeLoader
     )
+
+    def __init__(self, *args, **kwargs) -> None:
+        # load hotfolders
+        if (hotfolder_src := Path(self.HOTFOLDER_SRC)).is_file():
+            self.hotfolders = util.load_hotfolders_from_file(hotfolder_src)
+        else:
+            self.hotfolders = util.load_hotfolders_from_string(
+                self.HOTFOLDER_SRC
+            )
+
+        super().__init__(*args, **kwargs)
 
     def set_identity(self) -> None:
         super().set_identity()

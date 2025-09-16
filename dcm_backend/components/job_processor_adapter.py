@@ -3,7 +3,6 @@ This module defines the Job Processor `ServiceAdapter`.
 """
 
 from typing import Any, Optional, Mapping, Iterable
-from pathlib import Path
 from copy import deepcopy
 
 from dcm_common.db import SQLAdapter
@@ -11,10 +10,11 @@ from dcm_common.orchestra import Status
 from dcm_common.services import APIResult, ServiceAdapter
 import dcm_job_processor_sdk
 
+from dcm_backend.config import AppConfig
 from dcm_backend.models import (
     JobConfig,
     TemplateConfig,
-    ImportSource,
+    Hotfolder,
 )
 
 
@@ -32,8 +32,9 @@ class JobProcessorAdapter(ServiceAdapter):
     _SERVICE_NAME = "Job Processor"
     _SDK = dcm_job_processor_sdk
 
-    def __init__(self, db: SQLAdapter, *args, **kwargs):
-        self._db = db
+    def __init__(self, db: SQLAdapter, config: AppConfig, *args, **kwargs):
+        self.db = db
+        self.config = config
         super().__init__(*args, **kwargs)
 
     def _get_api_clients(self):
@@ -184,7 +185,7 @@ class JobProcessorAdapter(ServiceAdapter):
         import_ips: Mapping,
         template: Mapping,
         job_config: Mapping,
-        hotfolder_import_sources: Iterable[ImportSource],
+        hotfolders: Iterable[Hotfolder],
         test_mode: bool = False,
     ) -> None:
         """Build 'import_ips'-section of the request body in place."""
@@ -196,19 +197,12 @@ class JobProcessorAdapter(ServiceAdapter):
         source_id = template.get("additionalInformation", {}).get(
             "sourceId"
         )
-        import_source = (
-            next(
-                (s for s in hotfolder_import_sources if s.id_ == source_id),
-                None,
-            )
-        )
-        if import_source is None:
-            raise ValueError(f"Unknown import source id '{source_id}'.")
+        hotfolder = hotfolders.get(source_id)
+        if hotfolder is None:
+            raise ValueError(f"Unknown hotfolder id '{source_id}'.")
         import_ips["import"]["target"] = {
-            "path": str(
-                Path(import_source.path)
-                / job_config.get("dataSelection", {}).get("path", "")
-            )
+            "hotfolderId": hotfolder.id_,
+            "path": job_config.get("dataSelection", {}).get("path")
         }
         import_ips["import"]["test"] = test_mode
 
@@ -311,7 +305,7 @@ class JobProcessorAdapter(ServiceAdapter):
 
         # using json-representation for easier handling of incomplete data
         template = TemplateConfig.from_row(
-            self._db.get_row("templates", job_config_["templateId"]).eval(
+            self.db.get_row("templates", job_config_["templateId"]).eval(
                 "formatting request for job processor"
             )
         ).json
@@ -366,10 +360,7 @@ class JobProcessorAdapter(ServiceAdapter):
             args["import_ips"],
             template,
             job_config_,
-            [
-                ImportSource.from_row(src)
-                for src in self._db.get_rows("hotfolder_import_sources").eval()
-            ],
+            self.config.hotfolders,
             test_mode,
         )
 

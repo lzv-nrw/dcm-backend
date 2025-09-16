@@ -4,7 +4,6 @@ Ingest View-class definition
 
 from typing import Optional
 import json
-import os
 from uuid import uuid4
 
 from flask import Blueprint, jsonify, Response, request

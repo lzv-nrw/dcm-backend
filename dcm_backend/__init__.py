@@ -56,6 +56,7 @@ def app_factory(
     # create components and View-classes
     adapter = JobProcessorAdapter(
         db=db or config.db,
+        config=config,
         url=config.JOB_PROCESSOR_HOST,
         interval=config.JOB_PROCESSOR_POLL_INTERVAL,
         timeout=config.JOB_PROCESSOR_TIMEOUT,

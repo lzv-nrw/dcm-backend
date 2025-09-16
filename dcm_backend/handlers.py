@@ -10,6 +10,7 @@ from data_plumber_http import (
     Boolean,
     Integer,
     Array,
+    FileSystemObject,
 )
 from data_plumber_http.settings import Responses
 from dcm_common.services import UUID
@@ -708,3 +709,12 @@ def get_template_config_handler(
             ),
         ).assemble(),
     )
+
+
+template_hotfolder_new_directory_handler = Object(
+    properties={
+        Property("id", "id_", required=True): String(),
+        Property("name", required=True): FileSystemObject(),
+    },
+    accept_only=["id", "name"],
+).assemble()

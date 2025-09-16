@@ -6,6 +6,7 @@ from typing import Optional
 import sys
 from hashlib import md5
 from uuid import uuid4
+from pathlib import Path
 
 from flask import Blueprint, jsonify, Response
 from argon2 import PasswordHasher
@@ -23,7 +24,8 @@ from dcm_backend.models import (
     UserConfigWithSecrets,
     WorkspaceConfig,
     TemplateConfig,
-    ImportSource,
+    HotfolderInfo,
+    HotfolderDirectoryInfo,
 )
 from dcm_backend.components import Scheduler
 from dcm_backend import handlers
@@ -876,14 +878,212 @@ class ConfigurationView(View):
                 status=200
             )
 
+    def _hotfolder_endpoints(self, bp: Blueprint):
+        @bp.route("/template/hotfolder", methods=["OPTIONS"])
+        @flask_handler(  # process query
+            handler=services.no_args_handler,
+            json=flask_args,
+        )
+        def hotfolder_options():
+            return (
+                jsonify(
+                    list(
+                        map(lambda h: h.json, self.config.hotfolders.values())
+                    )
+                ),
+                200,
+            )
+
+        @bp.route("/template/hotfolder/directory", methods=["OPTIONS"])
+        @flask_handler(  # process query
+            handler=handlers.get_config_id_handler(True),
+            json=flask_args,
+        )
+        def hotfolder_directory_options(id_: str):
+            if id_ not in self.config.hotfolders:
+                return Response(
+                    f"Unknown hotfolder identifier '{id_}'.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+            if not self.config.hotfolders[id_].mount.is_dir():
+                return Response(
+                    "Encountered a bad hotfolder configuration with id "
+                    + f"'{id_}' (hotfolder is not mounted). Please contact "
+                    + "the system administrator.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+
+            # collect directories
+            directories = {
+                p.name: HotfolderDirectoryInfo(p.name, False)
+                for p in filter(
+                    Path.is_dir,
+                    self.config.hotfolders[id_].mount.glob("*"),
+                )
+            }
+
+            # identify directories that are already in use
+            # * find templates that use this hotfolder
+            #   (both row and json are intended to cover both status=ok
+            #   and status=draft; the latter stores raw JSON)
+            template_ids = self.db.custom_cmd(
+                # pylint: disable=consider-using-f-string
+                """SELECT id FROM templates
+                WHERE type='hotfolder'
+                AND (
+                  additional_information={} OR additional_information={}
+                )""".format(
+                    self.db.decode(HotfolderInfo(id_).row, "jsonb"),
+                    self.db.decode(HotfolderInfo(id_).json, "jsonb"),
+                )
+            ).eval()
+            # * collect data-selections of job-configurations that use
+            #   these templates
+            job_configs = []
+            for template_id in map(lambda x: x[0], template_ids):
+                job_configs.extend(
+                    self.db.get_rows(
+                        "job_configs",
+                        template_id,
+                        "template_id",
+                        ["id", "data_selection"],
+                    ).eval()
+                )
+            # * update directories using the collected data
+            for job_config in job_configs:
+                name = (job_config.get("data_selection") or {}).get("path")
+                if name is None or name not in directories:
+                    continue
+                directories[name].in_use = True
+                directories[name].linked_job_configs.append(
+                    job_config.get("id")
+                )
+
+            return (
+                jsonify(list(map(lambda d: d.json, directories.values()))),
+                200,
+            )
+
+        @bp.route(
+            "/template/hotfolder/directory",
+            methods=["POST"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # process query
+            handler=services.no_args_handler,
+            json=flask_args,
+        )
+        @flask_handler(  # process body
+            handler=handlers.template_hotfolder_new_directory_handler,
+            json=flask_json,
+        )
+        def new_hotfolder_directory(id_: str, name: Path):
+            if id_ not in self.config.hotfolders:
+                return Response(
+                    f"Unknown hotfolder identifier '{id_}'.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+            if not self.config.hotfolders[id_].mount.is_dir():
+                return Response(
+                    "Encountered a bad hotfolder configuration with id "
+                    + f"'{id_}' (hotfolder is not mounted). Please contact "
+                    + "the system administrator.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+            if name.is_absolute():
+                return Response(
+                    "Directory is required to be relative.",
+                    mimetype="text/plain",
+                    status=422,
+                )
+            if len(name.parents) == 0:
+                return Response(
+                    "Directory is empty.",
+                    mimetype="text/plain",
+                    status=422,
+                )
+            if len(name.parents) > 1:
+                return Response(
+                    "Invalid directory name: only a single-level name is"
+                    + "allowed (no subdirectories).",
+                    mimetype="text/plain",
+                    status=422,
+                )
+
+            # handle bad characters
+            bad_characters = [
+                # null
+                "\x00",
+                # forbidden on Windows / posix separator
+                "/",
+                "\\",
+                ":",
+                "*",
+                "?",
+                '"',
+                "<",
+                ">",
+                "|",
+                # control / whitespace chars
+                "\n",
+                "\r",
+                "\t",
+                "\x0b",
+                "\x0c",
+                # other characters
+                "#",
+                "%",
+                "&",
+                "{",
+                "}",
+                "$",
+                "!",
+                "@",
+                "+",
+                "`",
+                "~",
+                ";",
+                "=",
+                ",",
+            ]
+            for c in bad_characters:
+                if c in name.name:
+                    return Response(
+                        f"Bad character {repr(c)} in directory name.",
+                        mimetype="text/plain",
+                        status=422,
+                    )
+
+            target = self.config.hotfolders[id_].mount / name
+            if target.exists():
+                return Response(
+                    "Target directory already exists.",
+                    mimetype="text/plain",
+                    status=409,
+                )
+            try:
+                target.mkdir(parents=False)
+            # pylint: disable=broad-exception-caught
+            except Exception as exc_info:
+                return Response(
+                    f"An unknown error occurred: {exc_info}.",
+                    mimetype="text/plain",
+                    status=500,
+                )
+
+            return Response(
+                "OK", mimetype="text/plain", status=200
+            )
+
+    # FIXME: DEPRECATED, remove on next major release
     def _hotfolder_sources(self, bp: Blueprint):
         @bp.route("/template/hotfolder-sources", methods=["GET"])
         def hotfolder_sources():
-            query = self.db.get_rows("hotfolder_import_sources").eval()
-            return (
-                jsonify([ImportSource.from_row(i).json for i in query]),
-                200,
-            )
+            return jsonify([]), 200
 
     def configure_bp(self, bp: Blueprint, *args, **kwargs) -> None:
         self._get_job_config(bp)
@@ -907,4 +1107,6 @@ class ConfigurationView(View):
         self._put_template_config(bp)
         self._post_template_config(bp)
         self._delete_template_config(bp)
+        self._hotfolder_endpoints(bp)
+        # FIXME: DEPRECATED, remove on next major release
         self._hotfolder_sources(bp)

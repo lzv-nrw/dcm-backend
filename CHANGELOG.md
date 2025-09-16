@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.3.0] - 2025-09-16
+
+### Added
+
+- added new hotfolder-related endpoints
+
+### Removed
+
+- removed hotfolder import source from being loaded from database
+
 ## [4.1.0] - 2025-09-11
 
 ### Changed

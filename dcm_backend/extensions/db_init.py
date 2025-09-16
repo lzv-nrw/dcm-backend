@@ -71,7 +71,6 @@ def _db_init(config, db, user_create, abort, result, requirements):
                 util.create_demo_templates(db)
                 util.create_demo_job_configs(db)
                 util.create_demo_jobs(db)
-                util.create_demo_import_sources(db)
 
             if not hasattr(config, "TESTING") or not config.TESTING:
                 util.DemoData.print(True, config.DB_GENERATE_DEMO)

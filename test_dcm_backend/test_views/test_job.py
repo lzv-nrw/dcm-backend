@@ -282,7 +282,7 @@ def test_post_failed_submission(no_orchestra_testing_config, minimal_config):
             [
                 f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
             ],
-            f"?id={util.DemoData.job_config2}",
+            f"?id={uuid4()}",
             [],
             200,
         ),
@@ -329,10 +329,10 @@ def test_post_failed_submission(no_orchestra_testing_config, minimal_config):
         (  # query for status non-empty (multiple)
             [
                 f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'queued')",
-                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token2}', 'running')",
+                "INSERT INTO jobs (token, status) VALUES ('a', 'running')",
             ],
             "?status=queued,running",
-            [util.DemoData.token1, util.DemoData.token2],
+            [util.DemoData.token1, "a"],
             200,
         ),
         (  # sql injection via status (ignored)
@@ -483,7 +483,7 @@ def test_abort(
             [
                 f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"
             ],
-            f"?id={util.DemoData.job_config2}",
+            f"?id={uuid4()}",
             0,
             200,
         ),
@@ -505,7 +505,7 @@ def test_abort(
             [
                 f"INSERT INTO records (id, job_token, success, report_id) VALUES ('{util.DemoData.record1}', '{util.DemoData.token1}', true, '<report-id>')"
             ],
-            f"?token={util.DemoData.token2}",
+            f"?token={str(uuid4())}",
             0,
             200,
         ),

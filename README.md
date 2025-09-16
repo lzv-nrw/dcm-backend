@@ -94,6 +94,20 @@ Service-specific environment variables are
 ### Users
 * `REQUIRE_USER_ACTIVATION` [DEFAULT 1]: whether new users are required to set password before login
 
+### Templates
+* `HOTFOLDER_SRC` [DEFAULT '[]']: array of hotfolders as JSON or path to a (UTF-8 encoded) JSON-file; every entry of that array needs to have the following signature
+  ```json
+  {
+    "id": "<unique id>",
+    "mount": "<mount path of the hotfolder>",
+    "name": "<display name of hotfolder>",
+    "description": "<(optional) description for hotfolder>"
+  }
+  ```
+
+  Note that the `"id"` is passed on to the [Import Module](https://github.com/lzv-nrw/dcm-import-module) during execution of a job with hotfolder-import.
+  Hence, the Import Module requires a matching definition of hotfolders.
+
 ### Scheduling
 * `SCHEDULING_CONTROLS_API` [DEFAULT 0] whether the scheduling-api is available
 * `SCHEDULING_AT_STARTUP` [DEFAULT 1] whether job scheduling-loop is active at startup

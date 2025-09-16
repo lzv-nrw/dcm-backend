@@ -2,6 +2,7 @@
 
 from uuid import uuid4
 from time import time, sleep
+from json import dumps
 from datetime import datetime, timedelta
 from copy import deepcopy
 
@@ -66,14 +67,18 @@ def test_get_job(no_orchestra_testing_config):
     ).json | {"workspaceId": util.DemoData.workspace1}
 
 
-def test_get_job_no_workspace(no_orchestra_testing_config):
+def test_get_job_no_workspace(no_orchestra_testing_config, minimal_job_config):
     """
     Test endpoint `GET-/job/configure` of config-API for a job config
     associated to a template with no associated workspace.
     """
     config = no_orchestra_testing_config()
     client = app_factory(config, block=True).test_client()
-    response = client.get(f"/job/configure?id={util.DemoData.job_config3}")
+    job_config_id = client.post(
+        "/job/configure",
+        json=minimal_job_config | {"templateId": util.DemoData.template3},
+    ).json["id"]
+    response = client.get(f"/job/configure?id={job_config_id}")
 
     assert response.status_code == 200
     assert response.mimetype == "application/json"
@@ -81,7 +86,7 @@ def test_get_job_no_workspace(no_orchestra_testing_config):
     assert (
         response.json
         == JobConfig.from_row(
-            config.db.get_row("job_configs", util.DemoData.job_config3).eval()
+            config.db.get_row("job_configs", job_config_id).eval()
         ).json
     )
 
@@ -338,7 +343,9 @@ def test_job_options(no_orchestra_testing_config):
     )
 
 
-def test_job_options_by_template(no_orchestra_testing_config):
+def test_job_options_by_template(
+    no_orchestra_testing_config, minimal_job_config
+):
     """Test endpoint `OPTIONS-/job/configure` of config-API."""
     config = no_orchestra_testing_config()
     client = app_factory(config, block=True).test_client()
@@ -349,11 +356,15 @@ def test_job_options_by_template(no_orchestra_testing_config):
     assert len(template1_jobs) == 1
     assert util.DemoData.job_config1 in template1_jobs
 
+    job_config_id = client.post(
+        "/job/configure",
+        json=minimal_job_config | {"templateId": util.DemoData.template2},
+    ).json["id"]
     template2_jobs = client.options(
         f"/job/configure?templateId={util.DemoData.template2}"
     ).json
     assert len(template2_jobs) == 1
-    assert util.DemoData.job_config2 in template2_jobs
+    assert job_config_id in template2_jobs
 
 
 @pytest.mark.parametrize(
@@ -361,7 +372,7 @@ def test_job_options_by_template(no_orchestra_testing_config):
     (
         pytest_args := [
             (util.DemoData.job_config1),  # job-config referenced by a job
-            (util.DemoData.job_config3),  # job-config not referenced by a job
+            (util.DemoData.template1),  # non-existent job-config
         ]
     ),
     ids=["with_job", "no_job"],
@@ -1141,14 +1152,176 @@ def test_delete_template(no_orchestra_testing_config, minimal_template_config):
     assert config.db.get_row("templates", t_id).eval() is None
 
 
-def test_list_hotfolder_sources(no_orchestra_testing_config):
-    """Test endpoint `GET-/template/hotfolder-sources` of config-API."""
-    config = no_orchestra_testing_config()
-    client = app_factory(config, block=True).test_client()
-    response = client.get("/template/hotfolder-sources")
+def test_list_hotfolders(no_orchestra_testing_config, temp_folder):
+    """Test endpoint `OPTIONS-/template/hotfolder` of config-API."""
 
+    hotfolder1 = temp_folder / str(uuid4())
+    hotfolder2 = temp_folder / str(uuid4())
+
+    hotfolder1.mkdir()
+    hotfolder2.mkdir()
+
+    class ConfigWithHotfolders(no_orchestra_testing_config):
+        HOTFOLDER_SRC = dumps(
+            [
+                {
+                    "id": "1",
+                    "mount": str(hotfolder1),
+                    "name": "hotfolder 1",
+                    "description": "description 1"
+                },
+                {
+                    "id": "2",
+                    "mount": str(hotfolder2),
+                    "name": "hotfolder 2",
+                },
+            ]
+        )
+
+    config = ConfigWithHotfolders()
+    client = app_factory(config, block=True).test_client()
+
+    response = client.options("/template/hotfolder")
     assert response.status_code == 200
-    assert response.mimetype == "application/json"
-    assert sorted([src["id"] for src in response.json]) == sorted(
-        [v for k, v in util.DemoData.__dict__.items() if "hotfolder" in k]
+    assert {h["id"]: h for h in response.json} == {
+        k: v.json for k, v in config.hotfolders.items()
+    }
+
+
+def test_list_hotfolder_directories(no_orchestra_testing_config, temp_folder):
+    """
+    Test endpoint `OPTIONS-/template/hotfolder/directory` of config-API.
+    """
+
+    hotfolder = temp_folder / str(uuid4())
+    subdir1 = hotfolder / "0"
+    subdir2 = hotfolder / "1"
+
+    subdir1.mkdir(parents=True)
+    subdir2.mkdir(parents=True)
+
+    class ConfigWithHotfolders(no_orchestra_testing_config):
+        HOTFOLDER_SRC = dumps(
+            [
+                {
+                    "id": "1",
+                    "mount": str(hotfolder),
+                    "name": "hotfolder 1",
+                    "description": "description 1"
+                },
+            ]
+        )
+
+    config = ConfigWithHotfolders()
+    client = app_factory(config, block=True).test_client()
+
+    # setup template + job configuration that use subdir2
+    response = client.post(
+        "/template/configure",
+        json={
+            "status": "draft",
+            "type": "hotfolder",
+            "additionalInformation": {"sourceId": "1"},
+        },
     )
+    assert response.status_code == 200
+    response = client.post(
+        "/job/configure",
+        json={
+            "status": "draft",
+            "templateId": response.json["id"],
+            "dataSelection": {"path": subdir2.name},
+        },
+    )
+    assert response.status_code == 200
+    job_config_id = response.json["id"]
+
+    response = client.options("/template/hotfolder/directory?id=1")
+    assert response.status_code == 200
+    assert sorted(map(lambda d: d["name"], response.json)) == [
+        subdir1.name,
+        subdir2.name,
+    ]
+    subdir1_info = next(d for d in response.json if d["name"] == subdir1.name)
+    assert not subdir1_info["inUse"]
+    subdir2_info = next(d for d in response.json if d["name"] == subdir2.name)
+    assert subdir2_info["inUse"]
+    assert subdir2_info["linkedJobConfigs"] == [job_config_id]
+
+
+def test_new_hotfolder_directory(no_orchestra_testing_config, temp_folder):
+    """
+    Test endpoint `POST-/template/hotfolder/directory` of config-API.
+    """
+
+    hotfolder = temp_folder / str(uuid4())
+
+    class ConfigWithHotfolders(no_orchestra_testing_config):
+        HOTFOLDER_SRC = dumps(
+            [
+                {
+                    "id": "1",
+                    "mount": str(hotfolder),
+                    "name": "hotfolder 1",
+                    "description": "description 1"
+                },
+            ]
+        )
+
+    config = ConfigWithHotfolders()
+    client = app_factory(config, block=True).test_client()
+
+    # hotfolder not mounted
+    response = client.post(
+        "/template/hotfolder/directory", json={"id": "1", "name": "a"}
+    )
+    assert response.status_code == 404
+    print(response.data)
+
+    hotfolder.mkdir()
+
+    # ok
+    assert client.post(
+        "/template/hotfolder/directory", json={"id": "1", "name": "a"}
+    ).status_code == 200
+
+    # already exists
+    response = client.post(
+        "/template/hotfolder/directory", json={"id": "1", "name": "a"}
+    )
+    assert response.status_code == 409
+    print(response.data)
+
+    # not relative
+    response = client.post(
+        "/template/hotfolder/directory", json={"id": "1", "name": "/a"}
+    )
+    assert response.status_code == 422
+    print(response.data)
+
+    # empty
+    response = client.post(
+        "/template/hotfolder/directory", json={"id": "1", "name": ""}
+    )
+    assert response.status_code == 422
+    print(response.data)
+
+    # not flat
+    response = client.post(
+        "/template/hotfolder/directory", json={"id": "1", "name": "a/b"}
+    )
+    assert response.status_code == 422
+    print(response.data)
+
+    # bad character
+    response = client.post(
+        "/template/hotfolder/directory", json={"id": "1", "name": "a\nb"}
+    )
+    assert response.status_code == 422
+    print(response.data)
+
+    # check results
+    assert client.options("/template/hotfolder/directory?id=1").json == [
+        {"name": "a", "inUse": False, "linkedJobConfigs": []}
+    ]
+    assert (hotfolder / "a").is_dir()

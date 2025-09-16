@@ -1,6 +1,9 @@
 """Utility definitions."""
 
 from typing import Callable
+import sys
+from pathlib import Path
+from json import loads, JSONDecodeError
 from uuid import uuid3, UUID
 import string
 from random import choice
@@ -12,16 +15,64 @@ from dcm_common.db import SQLAdapter
 from dcm_backend.models import (
     UserConfig,
     GroupMembership,
-    ImportSource,
     WorkspaceConfig,
-    HotfolderInfo,
-    OAIInfo,
     PluginInfo,
-    TransferUrlFilter,
     TemplateConfig,
     JobConfig,
     TriggerType,
+    Hotfolder,
 )
+
+
+def load_hotfolders_from_string(json: str) -> dict[str, Hotfolder]:
+    """Loads hotfolders from the given JSON-string."""
+
+    try:
+        hotfolders_json = loads(json)
+    except JSONDecodeError as exc_info:
+        raise ValueError(
+            f"Invalid hotfolder-configuration: {exc_info}."
+        ) from exc_info
+
+    if not isinstance(hotfolders_json, list):
+        raise ValueError(
+            "Invalid hotfolder-configuration: Expected list of hotfolders but "
+            + f"got '{type(hotfolders_json).__name__}'."
+        )
+
+    hotfolders = {}
+    for hotfolder in hotfolders_json:
+        if not isinstance(hotfolder.get("id"), str):
+            raise ValueError(
+                f"Bad hotfolder id '{hotfolder.get('id')}' (bad type)."
+            )
+        if hotfolder["id"] in hotfolders:
+            raise ValueError(
+                f"Non-unique hotfolder id '{hotfolder['id']}'."
+            )
+        try:
+            hotfolders[hotfolder["id"]] = Hotfolder.from_json(hotfolder)
+        except (TypeError, ValueError) as exc_info:
+            raise ValueError(
+                f"Unable to deserialize hotfolder: {hotfolder}."
+            ) from exc_info
+
+    for hotfolder in hotfolders.values():
+        if not hotfolder.mount.is_dir():
+            print(
+                "\033[1;33m"
+                + f"WARNING: Mount point '{hotfolder.mount}' for hotfolder "
+                + f"'{hotfolder.id_}' ({hotfolder.name}) is invalid."
+                + "\033[0m",
+                file=sys.stderr,
+            )
+
+    return hotfolders
+
+
+def load_hotfolders_from_file(path: Path) -> dict[str, Hotfolder]:
+    """Loads hotfolders from the given `path` (JSON-file)."""
+    return load_hotfolders_from_string(path.read_text(encoding="utf-8"))
 
 
 uuid_namespace = UUID("96ee5d00-d6fe-4993-9a2d-49670a65f2cf")
@@ -31,6 +82,7 @@ default_admin_password = "".join(
         for _ in range(15)
     ]
 )
+
 
 class DemoData:
     """Generated demo-data uuids."""
@@ -46,18 +98,8 @@ class DemoData:
     template2 = str(uuid3(uuid_namespace, name="template2"))
     template3 = str(uuid3(uuid_namespace, name="template3"))
     job_config1 = str(uuid3(uuid_namespace, name="job_config1"))
-    job_config2 = str(uuid3(uuid_namespace, name="job_config2"))
-    job_config3 = str(uuid3(uuid_namespace, name="job_config3"))
     token1 = str(uuid3(uuid_namespace, name="token1"))
-    token2 = str(uuid3(uuid_namespace, name="token2"))
     record1 = str(uuid3(uuid_namespace, name="record1"))
-    record2 = str(uuid3(uuid_namespace, name="record2"))
-    hotfolder_import_source1 = str(
-        uuid3(uuid_namespace, name="hotfolder_import_source1")
-    )
-    hotfolder_import_source2 = str(
-        uuid3(uuid_namespace, name="hotfolder_import_source2")
-    )
 
     @classmethod
     def print(cls, user: bool, other: bool):
@@ -86,14 +128,8 @@ class DemoData:
             ("template2", cls.template2),
             ("template3", cls.template3),
             ("job_config1", cls.job_config1),
-            ("job_config2", cls.job_config2),
-            ("job_config3", cls.job_config3),
             ("token1", cls.token1),
-            ("token2", cls.token2),
             ("record1", cls.record1),
-            ("record2", cls.record2),
-            ("hotfolder_import_source1", cls.hotfolder_import_source1),
-            ("hotfolder_import_source2", cls.hotfolder_import_source2),
         ]
         # calculate required space
         line_length = (
@@ -276,7 +312,7 @@ def create_demo_templates(db: SQLAdapter):
         ),
         TemplateConfig(
             id_=DemoData.template2,
-            status="ok",
+            status="draft",
             workspace_id=DemoData.workspace2,
             name="Template 2",
             description=(
@@ -284,59 +320,22 @@ def create_demo_templates(db: SQLAdapter):
                 + "die IPs aus einem Hotfolder importieren."
             ),
             type_="hotfolder",
-            additional_information=HotfolderInfo(
-                DemoData.hotfolder_import_source1
-            ),
             user_created=DemoData.user0,
             datetime_created=now().isoformat(),
         ),
         TemplateConfig(
             id_=DemoData.template3,
-            status="ok",
+            status="draft",
             name="Template 3",
             description=(
                 "Dies ist ein Template für Jobs, die OAI-PMH verwenden."
             ),
             type_="oai",
-            additional_information=OAIInfo(
-                "https://lzv.nrw/oai",
-                "oai_dc",
-                [
-                    TransferUrlFilter(
-                        r"(https://lzv\.nrw/oai/transfer=[a-z0-9]+)",
-                        "/OAI-PMH/GetRecord/record/metadata",
-                    )
-                ],
-            ),
             user_created=DemoData.user0,
             datetime_created=now().isoformat(),
         ),
     ]:
         db.insert("templates", t.row).eval()
-
-
-def create_demo_import_sources(db: SQLAdapter):
-    """
-    Creates a set of demo import sources.
-
-    Keyword arguments:
-    db -- database that should be written to
-    """
-    for import_source in [
-        ImportSource(
-            id_=DemoData.hotfolder_import_source1,
-            name="Hotfolder 1",
-            path="import/src0",
-            description="System 1 Hotfolder-Import",
-        ),
-        ImportSource(
-            id_=DemoData.hotfolder_import_source2,
-            name="Hotfolder 2",
-            path="import/src1",
-            description="System 2 Hotfolder-Import",
-        ),
-    ]:
-        db.insert("hotfolder_import_sources", import_source.row).eval()
 
 
 def create_demo_job_configs(db: SQLAdapter):
@@ -371,31 +370,6 @@ def create_demo_job_configs(db: SQLAdapter):
                 },
                 "userCreated": DemoData.user1,
                 "datetimeCreated": now().isoformat(),
-            }
-        ),
-        # minimal JobConfig based on a template associated with workspace2
-        JobConfig.from_json(
-            {
-                "id": DemoData.job_config2,
-                "status": "ok",
-                "templateId": DemoData.template2,
-                "latest_exec": DemoData.token2,
-                "name": "Demo-Job 2",
-                "description": "Hotfolder Import-Job",
-                "contactInfo": "curie@lzv.nrw",
-                "schedule": {"active": False},
-                "userCreated": DemoData.user2,
-                "datetimeCreated": now().isoformat(),
-            }
-        ),
-        # minimal JobConfig based on a template with no associated workspace
-        JobConfig.from_json(
-            {
-                "id": DemoData.job_config3,
-                "templateId": DemoData.template3,
-                "status": "draft",
-                "name": "Demo-Job 3",
-                "description": "OAI Import-Job",
             }
         ),
     ]:
@@ -1399,209 +1373,6 @@ def create_demo_jobs(db: SQLAdapter):
             "value": DemoData.token1,
         },
     }
-    report2 = {
-        "args": {
-            "id": "demo",
-            "process": {
-                "args": {
-                    "build_ip": {
-                        "build": {
-                            "mappingPlugin": {"args": {}, "plugin": "demo"}
-                        }
-                    },
-                    "import_ies": {
-                        "import": {
-                            "args": {
-                                "bad_ies": True,
-                                "number": 2,
-                                "randomize": True,
-                            },
-                            "plugin": "demo",
-                        }
-                    },
-                    "ingest": {"ingest": {"archiveId": "", "target": {}}},
-                    "validation_payload": {
-                        "validation": {
-                            "plugins": {
-                                "format": {
-                                    "args": {},
-                                    "plugin": "jhove-fido-mimetype-bagit",
-                                },
-                                "integrity": {
-                                    "args": {},
-                                    "plugin": "integrity-bagit",
-                                },
-                            }
-                        }
-                    },
-                },
-                "from": "import_ies",
-                "to": "ingest",
-            },
-        },
-        "children": {
-            "44aa0969-7b0f-4be5-88ff-9d7d14f57db6-1@import_ies": {
-                "args": {
-                    "import": {
-                        "args": {
-                            "bad_ies": True,
-                            "number": 2,
-                            "randomize": True,
-                        },
-                        "plugin": "demo",
-                    }
-                },
-                "data": {
-                    "IEs": {
-                        "test:oai_dc:0478b6eb-6270-4a8b-bdc0-49e69a4e3e0d": {
-                            "IPIdentifier": None,
-                            "fetchedPayload": False,
-                            "path": "ie/1fb516d1-05d2-408f-aacd-214b989e073e",
-                            "sourceIdentifier": "test:oai_dc:0478b6eb-6270-4a8b-bdc0-49e69a4e3e0d",
-                        }
-                    },
-                    "success": False,
-                },
-                "host": "http://import-module/",
-                "log": {
-                    "EVENT": [
-                        {
-                            "body": "Produced at 2025-03-17T10:07:56.140076+00:00 by 'UBPORT277'.",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "Import Module",
-                        },
-                        {
-                            "body": "Consumed at 2025-03-17T10:07:56.723353+00:00 by 'UBPORT277'.",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "Import Module",
-                        },
-                        {
-                            "body": "Start executing Job.",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "Import Module",
-                        },
-                        {
-                            "body": "Job terminated normally.",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "Import Module",
-                        },
-                    ],
-                    "INFO": [
-                        {
-                            "body": "Starting to generate IEs.",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "Import Module",
-                        },
-                        {
-                            "body": "Created IE in 'ie/7ab7802e-7cd9-40e3-b53e-fc8ed7f8d87c'.",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "demo",
-                        },
-                        {
-                            "body": "Created IE in 'ie/1fb516d1-05d2-408f-aacd-214b989e073e'.",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "demo",
-                        },
-                        {
-                            "body": "Collected 1 IE(s) with 1 error(s).",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "Import Module",
-                        },
-                        {
-                            "body": "Skip building IPs (request does not contain build-information).",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "Import Module",
-                        },
-                    ],
-                    "ERROR": [
-                        {
-                            "body": "Bad IE 'test:oai_dc:0478b6eb-6270-4a8b-bdc0-49e69a4e3e0d'.",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "demo",
-                        },
-                        {
-                            "body": "Got 1 error(s) while importing.",
-                            "datetime": "2025-03-17T10:07:56+00:00",
-                            "origin": "Import Module",
-                        },
-                    ],
-                },
-                "progress": {
-                    "numeric": 100,
-                    "status": "completed",
-                    "verbose": "shutting down after success",
-                },
-                "token": {
-                    "expires": True,
-                    "expires_at": "2025-03-17T11:07:56+00:00",
-                    "value": "44aa0969-7b0f-4be5-88ff-9d7d14f57db6",
-                },
-            },
-        },
-        "data": {
-            "records": {
-                "test:oai_dc:0478b6eb-6270-4a8b-bdc0-49e69a4e3e0d": {
-                    "completed": True,
-                    "stages": {
-                        "import_ies": {
-                            "completed": True,
-                            "logId": "44aa0969-7b0f-4be5-88ff-9d7d14f57db6-1@import_ies",
-                            "success": False,
-                        }
-                    },
-                    "success": False,
-                },
-            },
-            "success": False,
-        },
-        "host": "http://job-processor/",
-        "log": {
-            "EVENT": [
-                {
-                    "body": "Produced at 2025-03-17T10:07:55.939409+00:00 by 'UBPORT277'.",
-                    "datetime": "2025-03-17T10:07:56+00:00",
-                    "origin": "Job Processor",
-                },
-                {
-                    "body": "Consumed at 2025-03-17T10:07:56.122593+00:00 by 'UBPORT277'.",
-                    "datetime": "2025-03-17T10:07:56+00:00",
-                    "origin": "Job Processor",
-                },
-                {
-                    "body": "Start executing Job.",
-                    "datetime": "2025-03-17T10:07:56+00:00",
-                    "origin": "Job Processor",
-                },
-                {
-                    "body": "Starting processor for job 'import_ies > ingest'.",
-                    "datetime": "2025-03-17T10:07:56+00:00",
-                    "origin": "Job Processor",
-                },
-                {
-                    "body": "Job terminated normally.",
-                    "datetime": "2025-03-17T10:07:57+00:00",
-                    "origin": "Job Processor",
-                },
-            ],
-            "INFO": [
-                {
-                    "body": "Job has been unsuccessful.",
-                    "datetime": "2025-03-17T10:07:57+00:00",
-                    "origin": "Job Processor",
-                }
-            ],
-        },
-        "progress": {
-            "numeric": 100,
-            "status": "completed",
-            "verbose": "shutting down after success",
-        },
-        "token": {
-            "expires": True,
-            "expires_at": "2025-03-17T11:07:55+00:00",
-            "value": DemoData.token2,
-        },
-    }
 
     db.insert(
         "jobs",
@@ -1631,32 +1402,5 @@ def create_demo_jobs(db: SQLAdapter):
                 "sip_id": "SIP0",
                 "ie_id": "IE0",
                 "datetime_processed": now().isoformat()
-            },
-        )
-    db.insert(
-        "jobs",
-        {
-            "token": DemoData.token2,
-            "job_config_id": DemoData.job_config2,
-            "datetime_triggered": "2025-03-18T10:00:00+00:00",
-            "trigger_type": TriggerType.MANUAL.value,
-            "status": "completed",
-            "success": False,
-            "datetime_started": "2025-03-18T10:00:00.000000+00:00",
-            "datetime_ended": "2025-03-18T10:01:00.000000+00:00",
-            "report": report2,
-        },
-    ).eval()
-    for report_id, record in report2["data"]["records"].items():
-        # only single record expected, set id explicitly
-        db.insert(
-            "records",
-            {
-                "id": DemoData.record2,
-                "report_id": report_id,
-                "job_token": DemoData.token2,
-                "success": record["success"],
-                "external_id": DemoData.record2,
-                "origin_system_id": "oai:demo",
             },
         )

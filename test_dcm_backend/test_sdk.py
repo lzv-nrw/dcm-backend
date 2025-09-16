@@ -3,6 +3,7 @@ Test module for the package `dcm-backend-sdk`.
 """
 
 from time import sleep
+from json import dumps
 from uuid import uuid4
 from hashlib import md5
 
@@ -70,6 +71,15 @@ def _job_sdk():
 @pytest.fixture(name="user_sdk", scope="module")
 def _user_sdk():
     return dcm_backend_sdk.UserApi(
+        dcm_backend_sdk.ApiClient(
+            dcm_backend_sdk.Configuration(host="http://localhost:8080")
+        )
+    )
+
+
+@pytest.fixture(name="template_sdk", scope="module")
+def _template_sdk():
+    return dcm_backend_sdk.TemplateApi(
         dcm_backend_sdk.ApiClient(
             dcm_backend_sdk.Configuration(host="http://localhost:8080")
         )
@@ -335,7 +345,7 @@ def test_job(
 
     # list jobs
     tokens = job_sdk.list_jobs()
-    assert len(tokens) == 3
+    assert len(tokens) == 2
     assert minimal_job["token"] in tokens
 
     # get job
@@ -611,21 +621,43 @@ def test_configure_template(
     config_sdk.get_template(util.DemoData.template1)
 
 
-def test_hotfolder_sources(
-    config_sdk: dcm_backend_sdk.ConfigApi,
+def test_hotfolder(
+    template_sdk: dcm_backend_sdk.TemplateApi,
     run_service,
+    temp_folder,
     sdk_testing_config,
 ):
-    """Test `/template/hotfolder-sources`-endpoint."""
+    """Test `/template/hotfolder`-endpoints."""
+    hotfolder = temp_folder / str(uuid4())
+
+    class ConfigWithHotfolders(sdk_testing_config):
+        HOTFOLDER_SRC = dumps(
+            [
+                {
+                    "id": "1",
+                    "mount": str(hotfolder),
+                    "name": "hotfolder 1",
+                    "description": "description 1"
+                },
+            ]
+        )
+
+    hotfolder.mkdir()
 
     run_service(
-        from_factory=lambda: app_factory(sdk_testing_config()),
+        from_factory=lambda: app_factory(ConfigWithHotfolders()),
         port=8080,
         probing_path="ready",
     )
-    response = config_sdk.get_hotfolder_sources()
-    assert sorted(
-        [src.model_dump(exclude_none=True)["id"] for src in response]
-    ) == sorted(
-        [v for k, v in util.DemoData.__dict__.items() if "hotfolder" in k]
-    )
+    assert len(template_sdk.list_hotfolders()) == 1
+    assert len(template_sdk.list_hotfolder_directories("1")) == 0
+    template_sdk.create_hotfolder_directory({"id": "1", "name": "a"})
+    directories = template_sdk.list_hotfolder_directories("1")
+    assert len(directories) == 1
+    assert directories[0].to_dict() == {
+        "name": "a",
+        "inUse": False,
+        "linkedJobConfigs": [],
+    }
+
+    assert (hotfolder / "a").is_dir()

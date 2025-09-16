@@ -1807,3 +1807,62 @@ def test_get_template_config_handler_created_metadata_false(json, status):
         print(output.last_message)
     else:
         assert isinstance(output.data.value["config"], TemplateConfig)
+
+
+@pytest.mark.parametrize(
+    ("json", "status"),
+    (
+        pytest_args := [
+            (
+                {
+                    "name": "a",
+                },
+                400,
+            ),
+            (
+                {
+                    "id": "0",
+                },
+                400,
+            ),
+            (
+                {
+                    "id": None,
+                    "name": "a",
+                },
+                422,
+            ),
+            (
+                {
+                    "id": "0",
+                    "name": None,
+                },
+                422,
+            ),
+            (
+                {
+                    "id": "0",
+                    "name": "a",
+                },
+                Responses.GOOD.status,
+            ),
+            (
+                {
+                    "id": "0",
+                    "name": "a",
+                    "name2": "b",
+                },
+                400,
+            ),
+        ]
+    ),
+    ids=[f"stage {i+1}" for i in range(len(pytest_args))],
+)
+def test_template_hotfolder_new_directory_handler(json, status):
+    """Test `template_hotfolder_new_directory_handler`."""
+
+    output = handlers.template_hotfolder_new_directory_handler.run(json=json)
+
+    assert output.last_status == status
+    if status != Responses.GOOD.status:
+        print(output.last_message)

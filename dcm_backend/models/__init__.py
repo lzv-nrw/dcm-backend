@@ -32,7 +32,7 @@ from .template_config import (
     OAIInfo,
     TemplateConfig,
 )
-from .import_source import ImportSource
+from .hotfolder import Hotfolder, HotfolderDirectoryInfo
 
 
 __all__ = [
@@ -68,5 +68,6 @@ __all__ = [
     "TransferUrlFilter",
     "OAIInfo",
     "TemplateConfig",
-    "ImportSource",
+    "Hotfolder",
+    "HotfolderDirectoryInfo",
 ]

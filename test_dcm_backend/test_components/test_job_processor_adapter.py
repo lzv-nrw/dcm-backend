@@ -4,12 +4,13 @@ import pytest
 from dcm_common.services import APIResult
 
 from dcm_backend.util import DemoData
-from dcm_backend.models import ImportSource, JobConfig
+from dcm_backend.models import Hotfolder, JobConfig
 from dcm_backend.components import JobProcessorAdapter
 
 
 class FakeDB:
     """Fake SQL-database"""
+
     TABLES = {}
 
     def __init__(self, tables=None):
@@ -17,23 +18,33 @@ class FakeDB:
 
     def get_row(self, table, value):
         """Get row"""
+
         class FakeTransactionResult:
             """Fake transaction result"""
+
             @staticmethod
             def eval(*args, **kwargs):
                 """Fake eval"""
                 return self.TABLES.get(table, {}).get(value)
+
         return FakeTransactionResult()
 
     def get_rows(self, table):
         """Get rows"""
+
         class FakeTransactionResult:
             """Fake transaction result"""
+
             @staticmethod
             def eval(*args, **kwargs):
                 """Fake eval"""
                 return self.TABLES.get(table, {}).values()
+
         return FakeTransactionResult()
+
+
+class FakeConfig:
+    hotfolders = {"0": Hotfolder("0", None, None)}
 
 
 @pytest.fixture(name="port")
@@ -48,7 +59,7 @@ def _url(port):
 
 @pytest.fixture(name="adapter")
 def _adapter(url):
-    return JobProcessorAdapter(FakeDB(), url)
+    return JobProcessorAdapter(FakeDB(), FakeConfig(), url)
 
 
 @pytest.fixture(name="target")
@@ -58,9 +69,7 @@ def _target():
 
 @pytest.fixture(name="request_body")
 def _request_body():
-    return {
-        "process": {"from": "transfer", "args": {}}, "id": "abcdef-123456"
-    }
+    return {"process": {"from": "transfer", "args": {}}, "id": "abcdef-123456"}
 
 
 @pytest.fixture(name="token")
@@ -68,7 +77,7 @@ def _token():
     return {
         "value": "eb7948a58594df3400696b6ce12013b0e26348ef27e",
         "expires": True,
-        "expires_at": "2024-08-09T13:15:10+00:00"
+        "expires_at": "2024-08-09T13:15:10+00:00",
     }
 
 
@@ -81,14 +90,14 @@ def _report(url, token, request_body):
         "progress": {
             "status": "completed",
             "verbose": "Job terminated normally.",
-            "numeric": 100
+            "numeric": 100,
         },
         "log": {
             "EVENT": [
                 {
                     "datetime": "2024-08-09T12:15:10+00:00",
                     "origin": "Job Processor",
-                    "body": "Some event"
+                    "body": "Some event",
                 },
             ]
         },
@@ -102,17 +111,17 @@ def _report(url, token, request_body):
                         "transfer": {
                             "completed": True,
                             "success": True,
-                            "logId": "0@transfer_module"
+                            "logId": "0@transfer_module",
                         },
                         "ingest": {
                             "completed": True,
                             "success": True,
-                            "logId": "1@backend"
-                        }
-                    }
+                            "logId": "1@backend",
+                        },
+                    },
                 }
-            }
-        }
+            },
+        },
     }
 
 
@@ -130,7 +139,7 @@ def _job_processor(port, token, report, run_service):
             ("/progress", lambda: (report["progress"], 200), ["GET"]),
             ("/report", lambda: (report, 200), ["GET"]),
         ],
-        port=port
+        port=port,
     )
 
 
@@ -142,7 +151,7 @@ def _job_processor_fail(port, token, report_fail, run_service):
             ("/progress", lambda: (report_fail["progress"], 200), ["GET"]),
             ("/report", lambda: (report_fail, 200), ["GET"]),
         ],
-        port=port
+        port=port,
     )
 
 
@@ -157,7 +166,11 @@ def test_run(
 
 
 def test_run_fail(
-    adapter: JobProcessorAdapter, request_body, target, report_fail, job_processor_fail
+    adapter: JobProcessorAdapter,
+    request_body,
+    target,
+    report_fail,
+    job_processor_fail,
 ):
     """Test method `run` of `JobProcessorAdapter`."""
     adapter.run(request_body, target, info := APIResult())
@@ -205,6 +218,7 @@ def test_build_request_body_draft_job():
                 },
             }
         ),
+        FakeConfig(),
         "",
     )
     with pytest.raises(ValueError) as exc_info:
@@ -235,6 +249,7 @@ def test_build_request_body_draft_template():
                 },
             }
         ),
+        FakeConfig(),
         "",
     )
     with pytest.raises(ValueError) as exc_info:
@@ -262,9 +277,7 @@ def test_build_request_body_from():
                         "id": DemoData.template1,
                         "status": "ok",
                         "type": "hotfolder",
-                        "additional_information": {
-                            "source_id": DemoData.hotfolder_import_source1
-                        }
+                        "additional_information": {"source_id": "0"},
                     },
                     DemoData.template2: {
                         "id": DemoData.template2,
@@ -272,19 +285,13 @@ def test_build_request_body_from():
                         "type": "plugin",
                         "additional_information": {
                             "plugin": "plugin",
-                            "args": {}
-                        }
-                    }
+                            "args": {},
+                        },
+                    },
                 },
-                "hotfolder_import_sources": {
-                    DemoData.hotfolder_import_source1: {
-                        "id": DemoData.hotfolder_import_source1,
-                        "name": "some source",
-                        "path": "some/path",
-                    }
-                }
             }
         ),
+        FakeConfig(),
         "",
     )
     assert (
@@ -302,7 +309,7 @@ def test_build_request_body_from():
             JobConfig(
                 template_id=DemoData.template2,
                 status="ok",
-                id_=DemoData.job_config2,
+                id_=DemoData.job_config1,
             )
         )["process"]["from"]
         == "import_ies"
@@ -408,28 +415,18 @@ def test_build_request_body_test_mode_pass_through(test_mode):
                         "id": DemoData.template1,
                         "status": "ok",
                         "type": "hotfolder",
-                        "additional_information": {
-                            "source_id": DemoData.hotfolder_import_source1
-                        }
+                        "additional_information": {"source_id": "0"},
                     },
                     DemoData.template2: {
                         "id": DemoData.template2,
                         "status": "ok",
                         "type": "oai",
-                        "additional_information": {
-                            "transfer_url_filters": []
-                        }
-                    }
+                        "additional_information": {"transfer_url_filters": []},
+                    },
                 },
-                "hotfolder_import_sources": {
-                    DemoData.hotfolder_import_source1: {
-                        "id": DemoData.hotfolder_import_source1,
-                        "name": "some source",
-                        "path": "some/path",
-                    }
-                }
             }
         ),
+        FakeConfig(),
         "",
     )
     assert (
@@ -449,7 +446,7 @@ def test_build_request_body_test_mode_pass_through(test_mode):
             JobConfig(
                 template_id=DemoData.template2,
                 status="ok",
-                id_=DemoData.job_config2,
+                id_=DemoData.job_config1,
             ),
             {},
             test_mode,
@@ -470,9 +467,7 @@ def test_build_request_body_import_ies_oai_pmh():
             "regex": r"https://lzv.nrw\?transfer=[0-9]+",
             "path": "a/b",
         },
-        {
-            "regex": r"https://lzv.nrw\?transfer=[0-9]+"
-        }
+        {"regex": r"https://lzv.nrw\?transfer=[0-9]+"},
     ]
     sets = ["set0", "set1"]
     from_ = "a"
@@ -501,7 +496,7 @@ def test_build_request_body_import_ies_oai_pmh():
                 "sets": sets,
                 "from": from_,
                 "until": until,
-            }
+            },
         },
     )
 
@@ -518,13 +513,13 @@ def test_build_request_body_import_ies_oai_pmh():
                     },
                     {
                         "regex": transfer_url_filters[1]["regex"],
-                    }
+                    },
                 ],
                 "identifiers": identifiers,
                 "set_spec": sets,
                 "from_": from_,
                 "until": until,
-                "test": False
+                "test": False,
             },
         }
     }
@@ -555,11 +550,7 @@ def test_build_request_body_import_ies_oai_pmh_test_mode():
     assert request_body == {
         "import": {
             "plugin": "oai_pmh_v2",
-            "args": {
-                "base_url": None,
-                "metadata_prefix": None,
-                "test": True
-            },
+            "args": {"base_url": None, "metadata_prefix": None, "test": True},
         }
     }
 
@@ -679,9 +670,7 @@ def test_build_request_body_build_ip_non_hotfolder_plugin():
             "id": DemoData.job_config1,
             "templateId": DemoData.template1,
             "status": "ok",
-            "dataProcessing": {
-                "mapping": {"type": "plugin", "data": plugin}
-            }
+            "dataProcessing": {"mapping": {"type": "plugin", "data": plugin}},
         },
     )
 
@@ -709,7 +698,7 @@ def test_build_request_body_import_ips_non_hotfolder():
             "templateId": DemoData.template1,
             "status": "ok",
         },
-        []
+        {},
     )
 
     assert request_body == {}
@@ -721,7 +710,6 @@ def test_build_request_body_import_ips_test_mode():
     test-import.
     """
     id_ = "some-id"
-    path = "this/is/the/path"
 
     request_body = {}
     JobProcessorAdapter.build_request_body_import_ips(
@@ -737,14 +725,14 @@ def test_build_request_body_import_ips_test_mode():
             "templateId": DemoData.template1,
             "status": "ok",
         },
-        [
-            ImportSource(id_, "src1", path),
-        ],
-        True
+        {
+            id_: Hotfolder(id_, None, None),
+        },
+        True,
     )
 
     assert request_body == {
-        "import": {"target": {"path": path}, "test": True}
+        "import": {"target": {"hotfolderId": id_, "path": None}, "test": True}
     }
 
 
@@ -754,8 +742,7 @@ def test_build_request_body_import_ips_hotfolder():
     hotfolder-import.
     """
     id_ = "some-id"
-    path = "this/is/the/path"
-    subdir = "hotfolder/subdir"
+    subdir = "subdir"
 
     request_body = {}
     JobProcessorAdapter.build_request_body_import_ips(
@@ -772,21 +759,24 @@ def test_build_request_body_import_ips_hotfolder():
             "status": "ok",
             "dataSelection": {"path": subdir},
         },
-        [
-            ImportSource("not-it", "src0", "not-the-path"),
-            ImportSource(id_, "src1", path),
-        ],
+        {
+            id_: Hotfolder(id_, None, None),
+            "not-it": Hotfolder("not-it", None, None),
+        },
     )
 
     assert request_body == {
-        "import": {"target": {"path": path + "/" + subdir}, "test": False}
+        "import": {
+            "target": {"hotfolderId": id_, "path": subdir},
+            "test": False,
+        }
     }
 
 
 def test_build_request_body_import_ips_hotfolder_unknown_source():
     """
     Test method `JobProcessorAdapter.build_request_body_import_ips` for
-    hotfolder-import and unknown import source.
+    hotfolder-import and unknown hotfolder id.
     """
     id_ = "unknown-id"
 
@@ -805,7 +795,7 @@ def test_build_request_body_import_ips_hotfolder_unknown_source():
                 "templateId": DemoData.template1,
                 "status": "ok",
             },
-            [],
+            {},
         )
 
     assert id_ in str(exc_info.value)
@@ -881,6 +871,4 @@ def test_build_request_body_ingest():
     request_body = {}
     JobProcessorAdapter.build_request_body_ingest(request_body)
 
-    assert request_body == {
-        "ingest": {"archiveId": "", "target": {}}
-    }
+    assert request_body == {"ingest": {"archiveId": "", "target": {}}}
