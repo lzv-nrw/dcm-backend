@@ -1325,3 +1325,46 @@ def test_new_hotfolder_directory(no_orchestra_testing_config, temp_folder):
         {"name": "a", "inUse": False, "linkedJobConfigs": []}
     ]
     assert (hotfolder / "a").is_dir()
+
+
+def test_list_archives(no_orchestra_testing_config):
+    """Test endpoint `OPTIONS-/template/archive` of config-API."""
+
+    class ConfigWithArchives(no_orchestra_testing_config):
+        ARCHIVES_SRC = dumps(
+            [
+                {
+                    "id": "0",
+                    "name": "a",
+                    "type": "rosetta-rest-api-v0",
+                    "transferDestinationId": "0a",
+                    "details": {
+                        "url": "",
+                        "materialFlow": "",
+                        "producer": "",
+                        "basicAuth": "",
+                    },
+                },
+                {
+                    "id": "1",
+                    "name": "b",
+                    "type": "rosetta-rest-api-v0",
+                    "transferDestinationId": "1a",
+                    "details": {
+                        "url": "",
+                        "materialFlow": "",
+                        "producer": "",
+                        "basicAuth": "",
+                    },
+                }
+            ]
+        )
+
+    client = app_factory(ConfigWithArchives(), block=True).test_client()
+
+    response = client.options("/template/archive")
+    assert response.status_code == 200
+    assert {h["id"]: h for h in response.json} == {
+        "0": {"id": "0", "name": "a"},
+        "1": {"id": "1", "name": "b"},
+    }

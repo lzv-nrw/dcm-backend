@@ -33,6 +33,7 @@ from .template_config import (
     TemplateConfig,
 )
 from .hotfolder import Hotfolder, HotfolderDirectoryInfo
+from .archive_configuration import RosettaRestV0Details, ArchiveConfiguration
 
 
 __all__ = [
@@ -70,4 +71,6 @@ __all__ = [
     "TemplateConfig",
     "Hotfolder",
     "HotfolderDirectoryInfo",
+    "RosettaRestV0Details",
+    "ArchiveConfiguration",
 ]

@@ -3,7 +3,6 @@
 import os
 from pathlib import Path
 from importlib.metadata import version
-import json
 
 import yaml
 from dcm_common.services import OrchestratedAppConfig, DBConfig
@@ -25,20 +24,8 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
     SCHEDULER_INIT_STARTUP_INTERVAL = 1.0
 
     # ------ INGEST (ARCHIVE_CONTROLLER) ------
-    ROSETTA_AUTH_FILE = Path(
-        os.environ["ROSETTA_AUTH_FILE"] if "ROSETTA_AUTH_FILE" in os.environ
-        else (Path.home() / ".rosetta/rosetta_auth")
-    )
-    ROSETTA_MATERIAL_FLOW = os.environ.get("ROSETTA_MATERIAL_FLOW") \
-        or "12345678"
-    ROSETTA_PRODUCER = os.environ.get("ROSETTA_PRODUCER") \
-        or "12345678"
-    ARCHIVE_API_BASE_URL = \
-        os.environ.get("ARCHIVE_API_BASE_URL") \
-        or "https://lzv-test.hbz-nrw.de"
-    ARCHIVE_API_PROXY = (
-        json.loads(os.environ["ARCHIVE_API_PROXY"])
-        if "ARCHIVE_API_PROXY" in os.environ else None
+    ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE = os.environ.get(
+        "ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE"
     )
 
     # ------ DATABASE ------
@@ -60,6 +47,7 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
 
     # ------ TEMPLATES ------
     HOTFOLDER_SRC = os.environ.get("HOTFOLDER_SRC", "[]")
+    ARCHIVES_SRC = os.environ.get("ARCHIVES_SRC", "[]")
 
     # ------ SCHEDULING ------
     SCHEDULING_CONTROLS_API = (
@@ -91,11 +79,29 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
 
     def __init__(self, *args, **kwargs) -> None:
         # load hotfolders
-        if (hotfolder_src := Path(self.HOTFOLDER_SRC)).is_file():
-            self.hotfolders = util.load_hotfolders_from_file(hotfolder_src)
-        else:
+        try:
+            hotfolder_src = Path(self.HOTFOLDER_SRC)
+            if not hotfolder_src.is_file():
+                raise FileNotFoundError("Not a file.")
+        except (OSError, FileNotFoundError):
             self.hotfolders = util.load_hotfolders_from_string(
                 self.HOTFOLDER_SRC
+            )
+        else:
+            self.hotfolders = util.load_hotfolders_from_file(hotfolder_src)
+
+        # load archives
+        try:
+            archives_src = Path(self.ARCHIVES_SRC)
+            if not archives_src.is_file():
+                raise FileNotFoundError("Not a file.")
+        except (OSError, FileNotFoundError):
+            self.archives = util.load_archive_configurations_from_string(
+                self.ARCHIVES_SRC
+            )
+        else:
+            self.archives = util.load_archive_configurations_from_file(
+                archives_src
             )
 
         super().__init__(*args, **kwargs)
@@ -117,19 +123,6 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
 
         # configuration
         settings = self.CONTAINER_SELF_DESCRIPTION["configuration"]["settings"]
-        settings["ingest"] = {
-            "archive_identifier": "rosetta",
-            "archive_settings": {
-                "auth": str(self.ROSETTA_AUTH_FILE),
-                "material_flow": self.ROSETTA_MATERIAL_FLOW,
-                "producer": self.ROSETTA_PRODUCER
-            },
-            "network": {
-                "url": self.ARCHIVE_API_BASE_URL
-            }
-        }
-        if self.ARCHIVE_API_PROXY is not None:
-            settings["ingest"]["proxy"] = self.ARCHIVE_API_PROXY
         settings["database"]["schemaVersion"] = version("dcm-database")
         settings["scheduling"] = {
             "controls_api": self.SCHEDULING_CONTROLS_API,

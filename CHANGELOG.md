@@ -1,5 +1,11 @@
 # Changelog
 
+## [5.0.0] - 2025-??-??
+
+### Changed
+
+- **Breaking:** migrated to API v4: updated endpoints, configuration, models, views, and other components to support multiple archive configurations in a single app
+
 ## [4.3.0] - 2025-09-16
 
 ### Added

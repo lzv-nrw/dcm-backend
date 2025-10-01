@@ -661,3 +661,36 @@ def test_hotfolder(
     }
 
     assert (hotfolder / "a").is_dir()
+
+
+def test_archive(
+    template_sdk: dcm_backend_sdk.TemplateApi,
+    run_service,
+    sdk_testing_config,
+):
+    """Test `/template/archive`-endpoints."""
+
+    class ConfigWithArchives(sdk_testing_config):
+        ARCHIVES_SRC = dumps(
+            [
+                {
+                    "id": "0",
+                    "name": "a",
+                    "type": "rosetta-rest-api-v0",
+                    "transferDestinationId": "0a",
+                    "details": {
+                        "url": "",
+                        "materialFlow": "",
+                        "producer": "",
+                        "basicAuth": "",
+                    },
+                },
+            ]
+        )
+
+    run_service(
+        from_factory=lambda: app_factory(ConfigWithArchives()),
+        port=8080,
+        probing_path="ready",
+    )
+    assert len(template_sdk.list_archives()) == 1

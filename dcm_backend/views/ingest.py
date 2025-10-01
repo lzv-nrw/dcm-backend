@@ -20,6 +20,7 @@ from dcm_backend.models import (
     RosettaTarget,
     ArchiveAPI,
     IngestResult,
+    RosettaRestV0Details,
     RosettaResult,
 )
 from dcm_backend.components import archive_controller
@@ -46,14 +47,26 @@ class IngestView(services.OrchestratedView):
             Returns status of ingest associated with
             `archive_id`.
             """
+            # additional validation (configuration and archive-specific)
+            # * check known archive ids
+            if archive_id not in self.config.archives:
+                return Response(
+                    f"Submission rejected: Unknown archive id '{archive_id}'.",
+                    mimetype="text/plain",
+                    status=404,
+                )
 
-            # TODO: load archive config via archiveID; then create correct
-            # archive-controller type with details from configuration
-            ac = archive_controller.RosettaAPIClient0(
-                auth=self.config.ROSETTA_AUTH_FILE,
-                url=self.config.ARCHIVE_API_BASE_URL,
-                proxies=self.config.ARCHIVE_API_PROXY,
-            )
+            # load archive-controller type with details from configuration
+            match self.config.archives[archive_id].type_:
+                case ArchiveAPI.ROSETTA_REST_V0:
+                    ac = archive_controller.RosettaAPIClient0(
+                        auth=self.config.archives[
+                            archive_id
+                        ].details.basic_auth
+                        or self.config.archives[archive_id].details.auth_file,
+                        url=self.config.archives[archive_id].details.url,
+                        proxies=self.config.archives[archive_id].details.proxy,
+                    )
 
             ingest = IngestResult(details=RosettaResult())
             # collect deposit
@@ -99,6 +112,41 @@ class IngestView(services.OrchestratedView):
             callback_url: Optional[str] = None,
         ):
             """Submit dir for ingesting in the archive system."""
+            # additional validation (configuration and archive-specific)
+            # * load default id if none has been provided
+            if ingest.archive_id is None:
+                if self.config.ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE is None:
+                    return Response(
+                        "Submission rejected: Missing archive id.",
+                        mimetype="text/plain",
+                        status=400,
+                    )
+                ingest.archive_id = (
+                    self.config.ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE
+                )
+            # * check known archive ids
+            if ingest.archive_id not in self.config.archives:
+                return Response(
+                    "Submission rejected: Unknown archive id "
+                    + f"'{ingest.archive_id}'.",
+                    mimetype="text/plain",
+                    status=404,
+                )
+            # * validate archive-specific target
+            match self.config.archives[ingest.archive_id].type_:
+                case ArchiveAPI.ROSETTA_REST_V0:
+                    validation = (
+                        handlers.post_ingest_rosetta_target_handler.run(
+                            json=ingest.target
+                        )
+                    )
+            if validation.last_status != Responses().GOOD.status:
+                return Response(
+                    f"Submission rejected: '{validation.last_message}'.",
+                    mimetype="text/plain",
+                    status=validation.last_status,
+                )
+
             try:
                 token = self.config.controller.queue_push(
                     token or str(uuid4()),
@@ -135,36 +183,61 @@ class IngestView(services.OrchestratedView):
         )
         info.report.log.set_default_origin("Backend")
 
-        # TODO: validate target and initialize correct model
-        # get configuration from api
-
-        # TODO: branch into different ingest-methods depending on
-        # target-type/archive-configuration
-
-        # archive_config = ArchiveConfiguration.from_row(self.db.select(...))
-        # ...
-        # match archive_config...:
-        #     case ArchiveAPI.ROSETTA_REST:
-        #         self.ingest_...(...)
-
-        # ROSETTA_REST - currently only supported archive
-        validation = handlers.post_ingest_rosetta_target_handler.run(
-            json=ingest_config.target
-        )
-        if validation.last_status == Responses().GOOD.status:
-            self._ingest_rosetta(
-                context,
-                info,
-                ingest_config,
-                validation.data.value,
+        # check archive configuration
+        if ingest_config.archive_id not in self.config.archives:
+            info.report.log.log(
+                Context.ERROR,
+                body=(
+                    f"Unknown archive id '{ingest_config.archive_id}'."
+                ),
             )
-        else:
+            info.report.data.success = False
+            info.report.progress.complete()
+            context.push()
+            self._run_callback(
+                context, info, info.config.request_body.get("callback_url")
+            )
+            return
+
+        archive_config = self.config.archives[ingest_config.archive_id]
+        info.report.log.log(
+            Context.INFO,
+            body=(
+                f"Triggering ingest in archive '{archive_config.name}' "
+                + f"({archive_config.id_})."
+            ),
+        )
+        context.push()
+
+        # de-serialize target depending on archive-type
+        # * run validation
+        match archive_config.type_:
+            case ArchiveAPI.ROSETTA_REST_V0:
+                validation = handlers.post_ingest_rosetta_target_handler.run(
+                    json=ingest_config.target
+                )
+        # * evaluate result
+        if validation.last_status != Responses().GOOD.status:
             self._handle_bad_target(
                 context,
                 info,
                 validation.last_record,
                 ArchiveAPI.ROSETTA_REST_V0,
             )
+            self._run_callback(
+                context, info, info.config.request_body.get("callback_url")
+            )
+            return
+
+        # branch into different ingest-methods depending on archive type
+        match archive_config.type_:
+            case ArchiveAPI.ROSETTA_REST_V0:
+                self._ingest_rosetta(
+                    context,
+                    info,
+                    validation.data.value,
+                    archive_config.details,
+                )
 
         # make callback; rely on _run_callback to push progress-update
         info.report.progress.complete()
@@ -188,10 +261,15 @@ class IngestView(services.OrchestratedView):
             ),
         )
         info.report.success = False
+        info.report.progress.complete()
         context.push()
 
     def _ingest_rosetta(
-        self, context: JobContext, info: JobInfo, _, target: RosettaTarget
+        self,
+        context: JobContext,
+        info: JobInfo,
+        target: RosettaTarget,
+        details: RosettaRestV0Details,
     ):
         # log
         info.report.progress.verbose = (
@@ -209,16 +287,15 @@ class IngestView(services.OrchestratedView):
 
         # create archive_controller
         ac = archive_controller.RosettaAPIClient0(
-            auth=self.config.ROSETTA_AUTH_FILE,
-            url=self.config.ARCHIVE_API_BASE_URL,
-            proxies=self.config.ARCHIVE_API_PROXY,
+            auth=details.basic_auth or details.auth_file,
+            url=details.url,
+            proxies=details.proxy,
         )
 
         # run deposit
         deposit = ac.post_deposit(
-            # FIXME
-            producer=self.config.ROSETTA_PRODUCER,
-            material_flow=self.config.ROSETTA_MATERIAL_FLOW,
+            producer=details.producer,
+            material_flow=details.material_flow,
             **target.json,
         )
 

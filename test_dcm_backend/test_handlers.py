@@ -1555,6 +1555,7 @@ def test_get_workspace_config_handler_created_metadata_false(json, status):
                     "description": "c",
                     "type": "plugin",
                     "additionalInformation": {"plugin": "demo", "args": {}},
+                    "targetArchive": {"id": "0"},
                 },
                 Responses().GOOD.status,
             ),
@@ -1586,6 +1587,50 @@ def test_get_workspace_config_handler_created_metadata_false(json, status):
                     "additionalInformation": {"sourceId": "some-id"},
                 },
                 Responses().GOOD.status,
+            ),
+            (
+                {
+                    "id": "a",
+                    "status": "ok",
+                    "name": "b",
+                    "type": "hotfolder",
+                    "additionalInformation": {"sourceId": "some-id"},
+                    "targetArchive": None,
+                },
+                422,
+            ),
+            (
+                {
+                    "id": "a",
+                    "status": "ok",
+                    "name": "b",
+                    "type": "hotfolder",
+                    "additionalInformation": {"sourceId": "some-id"},
+                    "targetArchive": {},
+                },
+                400,
+            ),
+            (
+                {
+                    "id": "a",
+                    "status": "ok",
+                    "name": "b",
+                    "type": "hotfolder",
+                    "additionalInformation": {"sourceId": "some-id"},
+                    "targetArchive": {"unknown": None},
+                },
+                400,
+            ),
+            (
+                {
+                    "id": "a",
+                    "status": "ok",
+                    "name": "b",
+                    "type": "hotfolder",
+                    "additionalInformation": {"sourceId": "some-id"},
+                    "targetArchive": {"id": None},
+                },
+                422,
             ),
             (
                 {
@@ -1656,7 +1701,7 @@ def test_get_template_config_handler_true(
                 "status": "ok",
                 "name": "b",
                 "type": "plugin",
-                "additionalInformation": {"plugin": "demo", "args": {}}
+                "additionalInformation": {"plugin": "demo", "args": {}},
             },
             Responses().GOOD.status
         ),

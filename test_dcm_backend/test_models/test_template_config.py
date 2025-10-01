@@ -7,6 +7,7 @@ from dcm_backend.models.template_config import (
     HotfolderInfo,
     TransferUrlFilter,
     OAIInfo,
+    TargetArchive,
     TemplateConfig,
 )
 
@@ -116,6 +117,12 @@ def test_oai_info_row_from_row():
     assert OAIInfo.from_row(row).row == row
 
 
+test_target_archive_json = get_model_serialization_test(
+    TargetArchive,
+    (((), {}), ((), {"id_": "0"})),
+)
+
+
 test_template_config_json = get_model_serialization_test(
     TemplateConfig,
     (
@@ -154,6 +161,7 @@ test_template_config_json = get_model_serialization_test(
                 "description": "some description",
                 "type_": "plugin",
                 "additional_information": PluginInfo("p-0", {}),
+                "target_archive": TargetArchive("0"),
                 "user_created": "a",
                 "datetime_created": "0",
                 "user_modified": "b",
@@ -196,6 +204,7 @@ def test_template_config_row_from_row():
         description="some description",
         type_="plugin",
         additional_information=PluginInfo("p-0", {}),
+        target_archive=TargetArchive("0"),
         user_created="a",
         datetime_created="0",
         user_modified="b",

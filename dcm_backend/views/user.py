@@ -89,7 +89,7 @@ class UserView(View):
         # pylint: disable=broad-exception-caught
         except Exception as exc_info:
             print(
-                f"Failed login attempt for user '{credentials.username}': "
+                f"Failed authentication for user '{credentials.username}': "
                 + str(exc_info),
                 file=sys.stderr,
             )

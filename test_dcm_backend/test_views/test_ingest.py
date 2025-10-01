@@ -37,6 +37,36 @@ def test_post_ingest_minimal(
     assert json["data"]["details"]["sip"] is not None
 
 
+def test_post_ingest_bad_request(testing_config, minimal_request_body):
+    """Test additional validation of /ingest-POST endpoint."""
+
+    app = app_factory(testing_config())
+    client = app.test_client()
+    app.extensions["orchestra"].stop(stop_on_idle=True)
+
+    # unknown archive
+    response = client.post(
+        "/ingest",
+        json=minimal_request_body
+        | {
+            "ingest": minimal_request_body["ingest"] | {"archiveId": "unknown"}
+        },
+    )
+    print(response.data)
+    assert response.status_code == 404
+
+    # bad ingest.target
+    response = client.post(
+        "/ingest",
+        json=minimal_request_body
+        | {
+            "ingest": minimal_request_body["ingest"] | {"target": {}}
+        },
+    )
+    print(response.data)
+    assert response.status_code == 400
+
+
 def test_post_ingest_fail_post_error(
     minimal_request_body, run_service, testing_config
 ):
@@ -131,7 +161,7 @@ def test_get_status_minimal(
     json = client.get(f"/report?token={token}").json
 
     response = client.get(
-        f"/ingest?archiveId=a&depositId={json['data']['details']['deposit']['id']}"
+        f"/ingest?archiveId=test-archive&depositId={json['data']['details']['deposit']['id']}"
     )
     assert response.status_code == 200
     assert response.mimetype == "application/json"
@@ -143,6 +173,18 @@ def test_get_status_minimal(
         == json["data"]["details"]["deposit"]
     )
     assert response.json["details"].get("sip") is not None
+
+
+def test_get_status_unknown_archive(testing_config):
+    """Test error-handling of /ingest-GET endpoint."""
+
+    app = app_factory(testing_config())
+    client = app.test_client()
+    app.extensions["orchestra"].stop(stop_on_idle=True)
+
+    response = client.get("/ingest?archiveId=unknown&depositId=0000")
+    print(response.data)
+    assert response.status_code == 404
 
 
 def test_get_status_error(testing_config, run_service):
@@ -177,15 +219,15 @@ def test_get_status_error(testing_config, run_service):
         port=5050,
     )
 
-    response = client.get("/ingest?archiveId=a&depositId=0000")
+    response = client.get("/ingest?archiveId=test-archive&depositId=0000")
     print(response.data)
     assert response.status_code == 502
 
-    response = client.get("/ingest?archiveId=a&depositId=x0")
+    response = client.get("/ingest?archiveId=test-archive&depositId=x0")
     print(response.data)
     assert response.status_code == 502
 
-    response = client.get("/ingest?archiveId=a&depositId=x1")
+    response = client.get("/ingest?archiveId=test-archive&depositId=x1")
     assert response.json["success"]
     assert response.json["details"].get("deposit") is not None
     assert response.json["details"].get("sip") is not None

@@ -15,6 +15,7 @@ from dcm_backend.models import (
     JobConfig,
     TemplateConfig,
     Hotfolder,
+    ArchiveConfiguration,
 )
 
 
@@ -266,12 +267,40 @@ class JobProcessorAdapter(ServiceAdapter):
             ] = sig_prop_operations
 
     @staticmethod
-    def build_request_body_ingest(ingest: Mapping) -> None:
+    def build_request_body_transfer(
+        transfer: Mapping,
+        template: Mapping,
+        default_archive_id: Optional[str],
+        archives: Mapping[str, ArchiveConfiguration],
+    ) -> None:
+        """Build 'transfer'-section of the request body in place."""
+        if "transfer" not in transfer:
+            transfer["transfer"] = {}
+
+        archive_id = template.get("targetArchive", {}).get(
+            "id", default_archive_id
+        )
+        if archive_id not in archives:
+            raise ValueError(
+                f"Unknown archive id '{archive_id}'."
+            )
+        transfer["transfer"]["destinationId"] = archives[
+            archive_id
+        ].transfer_destination_id
+
+    @staticmethod
+    def build_request_body_ingest(
+        ingest: Mapping, template: Mapping, default_archive_id: Optional[str]
+    ) -> None:
         """Build 'ingest'-section of the request body in place."""
         if "ingest" not in ingest:
             ingest["ingest"] = {}
 
-        ingest["ingest"]["archiveId"] = ""
+        archive_id = template.get("targetArchive", {}).get(
+            "id", default_archive_id
+        )
+        if archive_id is not None:
+            ingest["ingest"]["archiveId"] = archive_id
 
         if "target" not in ingest["ingest"]:
             ingest["ingest"]["target"] = {}
@@ -380,12 +409,19 @@ class JobProcessorAdapter(ServiceAdapter):
             return request_body
 
         # - transfer
-        #   TODO: template_config.destination
+        self.build_request_body_transfer(
+            args["transfer"],
+            template,
+            self.config.ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE,
+            self.config.archives
+        )
 
         # - ingest
-        #   TODO: load data for destination from template/database instead
-        #   of generating static values
-        self.build_request_body_ingest(args["ingest"])
+        self.build_request_body_ingest(
+            args["ingest"],
+            template,
+            self.config.ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE,
+        )
 
         return request_body
 

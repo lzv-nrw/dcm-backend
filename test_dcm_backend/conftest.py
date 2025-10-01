@@ -40,11 +40,23 @@ def _testing_config(fixtures):
     """Returns test-config"""
     # setup config-class
     class TestingConfig(AppConfig):
-        ROSETTA_MATERIAL_FLOW = "000000"
-        ROSETTA_PRODUCER = "000000"
-        ROSETTA_AUTH_FILE = fixtures / ".rosetta/rosetta_auth"
-        ARCHIVE_API_BASE_URL = "http://localhost:5050"
         TESTING = True
+
+        ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE = "test-archive"
+        ARCHIVES_SRC = """[
+    {
+        "id": "test-archive",
+        "name": "Test Archive",
+        "type": "rosetta-rest-api-v0",
+        "transferDestinationId": "test-archive",
+        "details": {
+            "url": "http://localhost:5050",
+            "materialFlow": "000000",
+            "producer": "000000",
+            "basicAuth": "Authorization: Basic AAAaaa"
+        }
+    }
+]"""
 
         ORCHESTRA_DAEMON_INTERVAL = 0.01
         ORCHESTRA_WORKER_INTERVAL = 0.01
@@ -75,7 +87,7 @@ def _minimal_request_body():
     """Returns minimal request body filled with test-subdir path."""
     return {
         "ingest": {
-            "archiveId": "0",
+            "archiveId": "test-archive",
             "target": {
                 "subdirectory": "/",
             }

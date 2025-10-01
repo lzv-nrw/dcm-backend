@@ -45,7 +45,7 @@ class RosettaAPIClient0:
         if isinstance(auth, Path):
             _auth_header = auth.read_text(encoding="utf-8").strip().split(": ")
         else:
-            _auth_header = auth.split(": ")
+            _auth_header = auth.strip().split(": ")
         if _auth_header[0] != "Authorization":
             raise ValueError(
                 "Bad authorization header (expected format 'Authorization: "

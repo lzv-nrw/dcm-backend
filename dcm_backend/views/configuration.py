@@ -1085,6 +1085,25 @@ class ConfigurationView(View):
         def hotfolder_sources():
             return jsonify([]), 200
 
+    def _archive_configuration_endpoints(self, bp: Blueprint):
+        @bp.route("/template/archive", methods=["OPTIONS"])
+        @flask_handler(  # process query
+            handler=services.no_args_handler,
+            json=flask_args,
+        )
+        def archive_options():
+            return (
+                jsonify(
+                    list(
+                        map(
+                            lambda h: {"id": h.id_, "name": h.name},
+                            self.config.archives.values(),
+                        )
+                    )
+                ),
+                200,
+            )
+
     def configure_bp(self, bp: Blueprint, *args, **kwargs) -> None:
         self._get_job_config(bp)
         self._post_job_config(bp)
@@ -1108,5 +1127,6 @@ class ConfigurationView(View):
         self._post_template_config(bp)
         self._delete_template_config(bp)
         self._hotfolder_endpoints(bp)
+        self._archive_configuration_endpoints(bp)
         # FIXME: DEPRECATED, remove on next major release
         self._hotfolder_sources(bp)

@@ -442,27 +442,6 @@ def get_user_config_handler(
 
             raise ValueError(f"Uncaught unknown status '{status}'.")
 
-    common_properties = ()
-    common_keys = (
-        [
-            "id",
-            "externalId",
-            "username",
-            "status",
-            "firstname",
-            "lastname",
-            "email",
-            "groups",
-            "widgetConfig",
-        ]
-        + (["userCreated", "datetimeCreated"] if accept_creation_md else [])
-        + (
-            ["userModified", "datetimeModified"]
-            if accept_modification_md
-            else []
-        )
-    )
-
     return _ConditionalPipeline(
         on_ok_or_inactive=Object(
             model=lambda **kwargs: {"config": UserConfig.from_json(kwargs)},
@@ -648,6 +627,10 @@ def get_template_config_handler(
                         "transferUrlFilters",
                     ],
                 ),
+                Property("targetArchive"): Object(
+                    properties={Property("id", required=True): String()},
+                    accept_only=["id"],
+                ),
             }
             | ConfigurationMetadataCreated
             | ConfigurationMetadataModified,
@@ -659,6 +642,7 @@ def get_template_config_handler(
                 "description",
                 "type",
                 "additionalInformation",
+                "targetArchive",
             ]
             + (
                 ["userCreated", "datetimeCreated"]
@@ -685,6 +669,7 @@ def get_template_config_handler(
                 Property("description"): String(),
                 Property("type"): String(enum=["plugin", "oai", "hotfolder"]),
                 Property("additionalInformation"): Object(free_form=True),
+                Property("targetArchive"): Object(free_form=True),
             }
             | ConfigurationMetadataCreated
             | ConfigurationMetadataModified,
@@ -696,6 +681,7 @@ def get_template_config_handler(
                 "description",
                 "type",
                 "additionalInformation",
+                "targetArchive",
             ]
             + (
                 ["userCreated", "datetimeCreated"]

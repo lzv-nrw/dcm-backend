@@ -4,7 +4,7 @@ import pytest
 from dcm_common.services import APIResult
 
 from dcm_backend.util import DemoData
-from dcm_backend.models import Hotfolder, JobConfig
+from dcm_backend.models import Hotfolder, ArchiveConfiguration, JobConfig
 from dcm_backend.components import JobProcessorAdapter
 
 
@@ -45,6 +45,23 @@ class FakeDB:
 
 class FakeConfig:
     hotfolders = {"0": Hotfolder("0", None, None)}
+    ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE = "default-archive"
+    archives = {
+        ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE: ArchiveConfiguration(
+            ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE,
+            "",
+            None,
+            None,
+            "default-destination",
+        ),
+        "test-archive": ArchiveConfiguration(
+            "test-archive",
+            "",
+            None,
+            None,
+            "test-destination",
+        )
+    }
 
 
 @pytest.fixture(name="port")
@@ -863,12 +880,81 @@ def test_build_request_body_prepare_ip():
     }
 
 
+def test_build_request_body_transfer():
+    """
+    Test method `JobProcessorAdapter.build_request_body_transfer`.
+    """
+
+    request_body = {}
+    JobProcessorAdapter.build_request_body_transfer(
+        request_body,
+        {"targetArchive": {"id": "test-archive"}},
+        "default-archive",
+        FakeConfig.archives,
+    )
+
+    assert request_body == {"transfer": {"destinationId": "test-destination"}}
+
+
+def test_build_request_body_transfer_missing_archive():
+    """
+    Test method `JobProcessorAdapter.build_request_body_transfer`.
+    """
+
+    request_body = {}
+    JobProcessorAdapter.build_request_body_transfer(
+        request_body, {}, "default-archive", FakeConfig.archives
+    )
+
+    assert request_body == {
+        "transfer": {"destinationId": "default-destination"}
+    }
+
+    with pytest.raises(ValueError):
+        JobProcessorAdapter.build_request_body_transfer(
+            {},
+            {},
+            "default-archive",
+            {},
+        )
+
+
 def test_build_request_body_ingest():
     """
     Test method `JobProcessorAdapter.build_request_body_ingest`.
     """
 
     request_body = {}
-    JobProcessorAdapter.build_request_body_ingest(request_body)
+    JobProcessorAdapter.build_request_body_ingest(
+        request_body,
+        {"targetArchive": {"id": "test-archive"}},
+        "default-archive",
+    )
 
-    assert request_body == {"ingest": {"archiveId": "", "target": {}}}
+    assert request_body == {
+        "ingest": {"archiveId": "test-archive", "target": {}}
+    }
+
+
+def test_build_request_body_ingest_missing_archive():
+    """
+    Test method `JobProcessorAdapter.build_request_body_ingest`.
+    """
+
+    request_body = {}
+    JobProcessorAdapter.build_request_body_ingest(
+        request_body, {}, "default-archive"
+    )
+
+    assert request_body == {
+        "ingest": {"archiveId": "default-archive", "target": {}}
+    }
+
+    request_body = {}
+    JobProcessorAdapter.build_request_body_ingest(
+        request_body, {}, None
+    )
+
+    assert request_body == {
+        "ingest": {"target": {}}
+    }

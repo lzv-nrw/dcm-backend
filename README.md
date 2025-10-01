@@ -107,6 +107,34 @@ Service-specific environment variables are
 
   Note that the `"id"` is passed on to the [Import Module](https://github.com/lzv-nrw/dcm-import-module) during execution of a job with hotfolder-import.
   Hence, the Import Module requires a matching definition of hotfolders.
+* `ARCHIVES_SRC` [DEFAULT '[]']: array of archive configurations as JSON or path to a (UTF-8 encoded) JSON-file; every entry of that array needs to have the following signature
+  ```json
+  {
+    "id": "<unique id>",
+    "name": "<display name for archive>",
+    "description": "<(optional) description for archive>",
+    "type": "<archive type (see below)>",
+    "transferDestinationId": "<transfer destination id>",
+    "details": { /* type-specific additional settings */ }
+  }
+  ```
+
+  Note that the `"transferDestinationId"` is passed on to the [Transfer Module](https://github.com/lzv-nrw/dcm-transfer-module) during execution of a job with the given target-archive.
+
+  Currently, the following archive types are available:
+  * `"rosetta-rest-api-v0"`:
+    * [ExLibris Rosetta REST-API](https://developers.exlibrisgroup.com/rosetta/apis/rest-apis/)
+    * schema for the accompanying `"details"` object:
+      ```json
+      {
+        "url": "<base-url for api-requests>",
+        "materialFlow": "<pre-configured material-flow id>",
+        "producer": "<pre-configured producer id>",
+        "authfile": "<path to a basic-auth header file>",
+        "basicAuth": "<basic auth header, i.e. 'Authorization: Basic ...'>",
+        "proxy": { /* JSON object; this is passed to the requests library*/ }
+      }
+      ```
 
 ### Scheduling
 * `SCHEDULING_CONTROLS_API` [DEFAULT 0] whether the scheduling-api is available
@@ -119,11 +147,7 @@ Service-specific environment variables are
 * `JOB_PROCESSOR_POLL_INTERVAL` [DEFAULT 1.0] Job Processor polling interval
 
 ### Ingest (Archive Controller)
-* `ROSETTA_AUTH_FILE` [DEFAULT "~/.rosetta/rosetta_auth"]: path to file with the Authorization HTTP header for all requests
-* `ROSETTA_MATERIAL_FLOW`: ID of the Material Flow used for deposit activities
-* `ROSETTA_PRODUCER`: Producer ID of deposit activities
-* `ARCHIVE_API_BASE_URL` [DEFAULT "https://lzv-test.hbz-nrw.de"]: url to the archive instance
-* `ARCHIVE_API_PROXY` [DEFAULT null]: JSON object containing a mapping of protocol name and corresponding proxy-address
+* `ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE` [DEFAULT null]: id of a default target-archive during an ingest (used if the request contains no id)
 
 Additionally this service provides environment options for
 * `BaseConfig`,

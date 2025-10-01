@@ -152,6 +152,28 @@ class OAIInfo(DataModel):
 INFO_INDEX = {"plugin": PluginInfo, "hotfolder": HotfolderInfo, "oai": OAIInfo}
 
 
+@dataclass
+class TargetArchive(DataModel):
+    """Data model for archive target-information."""
+    id_: Optional[str] = None
+
+    @DataModel.serialization_handler("id_", "id")
+    @classmethod
+    def id__serialization_handler(cls, value):
+        """Handles `id_`-serialization."""
+        if value is None:
+            DataModel.skip()
+        return value
+
+    @DataModel.deserialization_handler("id_", "id")
+    @classmethod
+    def id__deserialization_handler(cls, value):
+        """Handles `id_`-deserialization."""
+        if value is None:
+            DataModel.skip()
+        return value
+
+
 class TemplateConfig(CuMetadata):
     """
     Data model for a template config.
@@ -164,6 +186,7 @@ class TemplateConfig(CuMetadata):
     description -- template description
     type_ -- connection type for this template
     additional_information -- type-specific data
+    target_archive -- target archive
 
     Inherits metadata-fields from `CuMetadata`.
     """
@@ -177,6 +200,7 @@ class TemplateConfig(CuMetadata):
     additional_information: Optional[
         JSONObject | PluginInfo | HotfolderInfo | OAIInfo
     ]
+    target_archive: Optional[TargetArchive]
 
     def __init__(
         self,
@@ -189,7 +213,8 @@ class TemplateConfig(CuMetadata):
         type_: Optional[str] = None,
         additional_information: Optional[
             JSONObject | PluginInfo | HotfolderInfo | OAIInfo
-        ] = (None),
+        ] = None,
+        target_archive: Optional[TargetArchive] = None,
         **kwargs,
     ) -> None:
         self.id_ = id_
@@ -199,6 +224,7 @@ class TemplateConfig(CuMetadata):
         self.description = description
         self.type_ = type_
         self.additional_information = additional_information
+        self.target_archive = target_archive
         super().__init__(**kwargs)
 
     @classmethod
@@ -238,6 +264,11 @@ class TemplateConfig(CuMetadata):
                     kwargs["type_"]
                 ].from_json(json["additionalInformation"])
 
+        if json.get("targetArchive") is not None:
+            kwargs["target_archive"] = TargetArchive.from_json(
+                json["targetArchive"]
+            )
+
         return cls(**kwargs)
 
     @DataModel.serialization_handler("id_", "id")
@@ -276,6 +307,14 @@ class TemplateConfig(CuMetadata):
             return value
         return value.json
 
+    @DataModel.serialization_handler("target_archive", "targetArchive")
+    @classmethod
+    def target_archive_serialization_handler(cls, value):
+        """Handles `target_archive`-serialization."""
+        if value is None:
+            DataModel.skip()
+        return value.json
+
     @property
     def row(self) -> dict:
         """Convert to database row."""
@@ -291,6 +330,8 @@ class TemplateConfig(CuMetadata):
                 row["additional_information"] = self.additional_information
             else:
                 row["additional_information"] = self.additional_information.row
+        if self.target_archive is not None:
+            row["target_archive"] = self.target_archive.json
         if self.id_ is not None:
             row["id"] = self.id_
         if self.user_created is not None:
@@ -328,4 +369,8 @@ class TemplateConfig(CuMetadata):
                 kwargs["additional_information"] = INFO_INDEX[
                     kwargs["type_"]
                 ].from_row(row.get("additional_information"))
+        if row.get("target_archive") is not None:
+            kwargs["target_archive"] = TargetArchive.from_json(
+                row["target_archive"]
+            )
         return cls(**kwargs)
