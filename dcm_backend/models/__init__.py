@@ -1,7 +1,10 @@
 from .archive_api import ArchiveAPI
 from .ingest_config import IngestConfig, RosettaTarget
 from .ingest_result import IngestResult, RosettaResult
-from .report import Report
+from .ingest_report import IngestReport
+from .bundle_config import BundleTarget, BundleConfig
+from .bundle_result import BundleInfo, BundleResult
+from .bundle_report import BundleReport
 from .job_config import (
     DataSelectionOAI,
     DataSelectionHotfolder,
@@ -16,7 +19,7 @@ from .job_config import (
     Schedule,
     JobConfig,
 )
-from .job_info import TriggerType, Record, JobInfo
+from .job_info import TriggerType, JobInfo
 from .user_config import (
     UserConfig,
     UserSecrets,
@@ -42,7 +45,12 @@ __all__ = [
     "IngestConfig",
     "RosettaResult",
     "IngestResult",
-    "Report",
+    "IngestReport",
+    "BundleReport",
+    "BundleTarget",
+    "BundleConfig",
+    "BundleInfo",
+    "BundleResult",
     "DataSelectionOAI",
     "DataSelectionHotfolder",
     "PluginConfig",
@@ -56,7 +64,6 @@ __all__ = [
     "Schedule",
     "JobConfig",
     "TriggerType",
-    "Record",
     "JobInfo",
     "UserConfig",
     "UserSecrets",

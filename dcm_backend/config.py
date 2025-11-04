@@ -1,11 +1,13 @@
 """Configuration module for the dcm-backend-app."""
 
 import os
+import sys
 from pathlib import Path
 from importlib.metadata import version
+from json import loads
 
 import yaml
-from dcm_common.services import OrchestratedAppConfig, DBConfig
+from dcm_common.services import OrchestratedAppConfig, FSConfig, DBConfig
 from dcm_common.orchestra import dillignore
 import dcm_database
 import dcm_backend_api
@@ -14,7 +16,7 @@ from dcm_backend import util
 
 
 @dillignore("controller", "worker_pool", "db")
-class AppConfig(OrchestratedAppConfig, DBConfig):
+class AppConfig(OrchestratedAppConfig, FSConfig, DBConfig):
     """
     Configuration for the dcm-backend-app.
     """
@@ -23,9 +25,29 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
     DB_INIT_STARTUP_INTERVAL = 1.0
     SCHEDULER_INIT_STARTUP_INTERVAL = 1.0
 
-    # ------ INGEST (ARCHIVE_CONTROLLER) ------
-    ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE = os.environ.get(
-        "ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE"
+    # ------ CLEANUP ------
+    CLEANUP_DISABLED = int(os.environ.get("CLEANUP_DISABLED", 0)) == 1
+    CLEANUP_TARGETS = os.environ.get(
+        "CLEANUP_TARGETS", '["ie", "ip", "pip", "sip"]'
+    )
+    CLEANUP_INTERVAL = float(os.environ.get("CLEANUP_INTERVAL", 3600))
+    CLEANUP_ARTIFACT_TTL = int(
+        os.environ.get("CLEANUP_ARTIFACT_TTL", 604800)
+    )
+
+    # ------ ARTIFACT ------
+    ARTIFACT_COMPRESSION = int(os.environ.get("ARTIFACT_COMPRESSION", 0)) == 1
+    ARTIFACT_BUNDLE_DESTINATION = Path(
+        os.environ.get("ARTIFACT_BUNDLE_DESTINATION", "bundles")
+    )
+    ARTIFACT_FILE_MAX_SIZE = int(
+        os.environ.get("ARTIFACT_FILE_MAX_SIZE", 0)
+    )
+    ARTIFACT_BUNDLE_MAX_SIZE = int(
+        os.environ.get("ARTIFACT_BUNDLE_MAX_SIZE", 0)
+    )
+    ARTIFACT_SOURCES = os.environ.get(
+        "ARTIFACT_SOURCES", '["ie", "ip", "pip", "sip"]'
     )
 
     # ------ DATABASE ------
@@ -104,6 +126,19 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
                 archives_src
             )
 
+        self.cleanup_targets = self.load_directories_relative_to_fs_mount_point(
+            loads(self.CLEANUP_TARGETS),
+            "Cleanup target",
+            False,
+        )
+
+        self.artifact_sources = self.load_directories_relative_to_fs_mount_point(
+            # pylint: disable=no-member
+            loads(self.ARTIFACT_SOURCES),
+            "Artifact source",
+            not hasattr(self, "TESTING") or not self.TESTING,
+        )
+
         super().__init__(*args, **kwargs)
 
     def set_identity(self) -> None:
@@ -140,3 +175,54 @@ class AppConfig(OrchestratedAppConfig, DBConfig):
         self.CONTAINER_SELF_DESCRIPTION["configuration"]["services"] = {
             "job_processor": self.JOB_PROCESSOR_HOST,
         }
+
+    def load_directories_relative_to_fs_mount_point(
+        self, dirs: list[str], what: str, log: bool
+    ) -> list[Path]:
+        """
+        Transforms list of `dirs` (paths relative to fs-mount-point as
+        strings) into a list of absolute `Path`s. In log-messages/errors
+        the resource is referred to as `what`. If not `log`, only errors
+        are raised.
+        """
+        result = []
+        if not isinstance(dirs, list):
+            raise ValueError(
+                f"Failed to load {what.lower()}s: Expected array but got "
+                + f"{type(dirs).__name__}."
+            )
+        for p in dirs:
+            if not isinstance(p, str):
+                raise ValueError(
+                    f"Failed to load {what.lower()}s: Expected array of "
+                    + f"strings but got array containing {type(p).__name__}."
+                )
+            if Path(p).is_absolute():
+                raise ValueError(
+                    f"{what} directory '{p}' is an absolute "
+                    + "directory. (Expected a directory relative to "
+                    + f"FS_MOUNT_POINT '{self.FS_MOUNT_POINT}'.)"
+                )
+            _p = (self.FS_MOUNT_POINT / p).resolve()
+            if log and not _p.exists():
+                print(
+                    "\033[1;33m"
+                    f"WARNING: {what} directory '{p}' does not exist "
+                    + f"in FS_MOUNT_POINT '{self.FS_MOUNT_POINT}'."
+                    + "\033[0m",
+                    file=sys.stderr,
+                )
+            if log and not _p.is_dir():
+                print(
+                    "\033[1;33m"
+                    f"WARNING: {what} '{p}' is not a directory."
+                    + "\033[0m",
+                    file=sys.stderr,
+                )
+            if self.FS_MOUNT_POINT.resolve() not in _p.parents:
+                raise ValueError(
+                    f"{what} directory '{p}' points outside of "
+                    + f"FS_MOUNT_POINT '{self.FS_MOUNT_POINT}'."
+                )
+            result.append(_p)
+        return result

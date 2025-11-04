@@ -1,4 +1,5 @@
 from .ingest import IngestView
+from .artifact import ArtifactView
 from .configuration import ConfigurationView
 from .job import JobView
 from .user import UserView

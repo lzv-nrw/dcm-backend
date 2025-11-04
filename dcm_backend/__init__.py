@@ -19,6 +19,7 @@ from dcm_backend.config import AppConfig
 from dcm_backend.components import Scheduler, JobProcessorAdapter
 from dcm_backend.views import (
     IngestView,
+    ArtifactView,
     ConfigurationView,
     JobView,
     UserView,
@@ -55,8 +56,6 @@ def app_factory(
 
     # create components and View-classes
     adapter = JobProcessorAdapter(
-        db=db or config.db,
-        config=config,
         url=config.JOB_PROCESSOR_HOST,
         interval=config.JOB_PROCESSOR_POLL_INTERVAL,
         timeout=config.JOB_PROCESSOR_TIMEOUT,
@@ -69,26 +68,31 @@ def app_factory(
             result = APIResult()
             token = adapter.submit(
                 None,
-                adapter.build_request_body(
-                    job_config=job_config,
-                    base_request_body={
-                        "context": {
-                            "jobConfigId": job_config.id_,
-                            "datetimeTriggered": now().isoformat(),
-                            "triggerType": (
-                                (
-                                    TriggerType.ONETIME
-                                    if job_config.schedule.repeat is None
-                                    else TriggerType.SCHEDULED
-                                ).value
-                            ),
-                        }
+                {
+                    "process": {
+                        "id": job_config.id_,
+                        "testMode": False,
+                        "resume": True,
                     },
-                ),
+                    "context": {
+                        "datetimeTriggered": now().isoformat(),
+                        "triggerType": (
+                            (
+                                TriggerType.ONETIME
+                                if job_config.schedule.repeat is None
+                                else TriggerType.SCHEDULED
+                            ).value
+                        ),
+                        "artifactsTTL": config.CLEANUP_ARTIFACT_TTL
+                    }
+                },
                 result,
             )
             if Context.ERROR in Logger.from_json(result.report.get("log", {})):
-                raise RuntimeError(f"An error occurred: {result.report}.")
+                raise RuntimeError(
+                    "An error occurred during a scheduled run of job "
+                    + f"'{job_config.id_}': {result.report}."
+                )
             (db or config.db).update(
                 "job_configs",
                 {"id": job_config.id_, "latest_exec": token.value},
@@ -104,6 +108,8 @@ def app_factory(
     password_hasher = PasswordHasher()
     view_ingest = IngestView(config)
     view_ingest.register_job_types()
+    view_artifact = ArtifactView(config)
+    view_artifact.register_job_types()
     configuration_view = ConfigurationView(
         config,
         db or config.db,
@@ -159,6 +165,13 @@ def app_factory(
             ),
         ],
     )
+    app.extensions["cleanup"] = extensions.cleanup_loader(
+        app, config, db or config.db, as_process, [
+            common_extensions.ExtensionEventRequirement(
+                app.extensions["db_init"].ready, "database initialized"
+            )
+        ]
+    )
 
     def ready():
         """Define condition for readiness."""
@@ -200,6 +213,10 @@ def app_factory(
     )
     app.register_blueprint(view_ingest.get_blueprint(), url_prefix="/")
     app.register_blueprint(ReportView(config).get_blueprint(), url_prefix="/")
+    app.register_blueprint(view_artifact.get_blueprint(), url_prefix="/")
+    app.register_blueprint(
+        ReportView(config).get_blueprint(name="artifact-reports"), url_prefix="/artifact"
+    )
     app.register_blueprint(configuration_view.get_blueprint(), url_prefix="/")
     app.register_blueprint(job_view.get_blueprint(), url_prefix="/")
     app.register_blueprint(user_view.get_blueprint(), url_prefix="/")

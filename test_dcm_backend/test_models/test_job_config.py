@@ -110,6 +110,7 @@ test_jobconfig_json = get_model_serialization_test(
                 ),
                 "workspace_id": "ws1",
                 "scheduled_exec": now(False),
+                "ies": 5,
                 "user_created": "a",
                 "datetime_created": "0",
                 "user_modified": "b",

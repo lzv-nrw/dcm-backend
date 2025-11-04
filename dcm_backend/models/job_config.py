@@ -379,6 +379,7 @@ class JobConfig(CuMetadata):
     schedule: Optional[Schedule]
     workspace_id: Optional[str]
     scheduled_exec: Optional[datetime]
+    ies: Optional[int]
 
     def __init__(
         self,
@@ -397,6 +398,7 @@ class JobConfig(CuMetadata):
         schedule: Optional[Schedule] = None,
         workspace_id: Optional[str] = None,
         scheduled_exec: Optional[datetime] = None,
+        ies: Optional[int] = None,
         **kwargs,
     ) -> None:
         self.template_id = template_id
@@ -411,6 +413,7 @@ class JobConfig(CuMetadata):
         self.schedule = schedule
         self.workspace_id = workspace_id
         self.scheduled_exec = scheduled_exec
+        self.ies = ies
         super().__init__(**kwargs)
 
     @DataModel.serialization_handler("template_id", "templateId")
@@ -538,6 +541,22 @@ class JobConfig(CuMetadata):
         if value is None:
             DataModel.skip()
         return datetime.fromisoformat(value)
+
+    @DataModel.serialization_handler("ies", "IEs")
+    @classmethod
+    def ies_serialization_handler(cls, value):
+        """Handles `ies`-serialization."""
+        if value is None:
+            DataModel.skip()
+        return value
+
+    @DataModel.deserialization_handler("ies", "IEs")
+    @classmethod
+    def ies_deserialization_handler(cls, value):
+        """Handles `ies`-deserialization."""
+        if value is None:
+            DataModel.skip()
+        return value
 
     @property
     def row(self) -> dict:

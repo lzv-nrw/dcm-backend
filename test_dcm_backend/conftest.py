@@ -7,7 +7,7 @@ import json
 from flask import Flask, jsonify, request
 import pytest
 from dcm_common.services.tests import (
-    external_service, run_service, tmp_setup, tmp_cleanup, wait_for_report
+    external_service, run_service, fs_setup, fs_cleanup, wait_for_report
 )
 
 from dcm_backend.config import AppConfig
@@ -18,9 +18,9 @@ def _fixtures():
     return Path("test_dcm_backend/fixtures/")
 
 
-@pytest.fixture(scope="session", name="temp_folder")
-def _temp_folder():
-    return Path("test_dcm_backend/temp_folder/")
+@pytest.fixture(scope="session", name="file_storage")
+def _file_storage():
+    return Path("test_dcm_backend/file_storage/")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -36,11 +36,12 @@ def disable_extension_logging():
 
 
 @pytest.fixture(name="testing_config")
-def _testing_config(fixtures):
+def _testing_config(file_storage):
     """Returns test-config"""
     # setup config-class
     class TestingConfig(AppConfig):
         TESTING = True
+        FS_MOUNT_POINT = file_storage
 
         ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE = "test-archive"
         ARCHIVES_SRC = """[
@@ -48,7 +49,6 @@ def _testing_config(fixtures):
         "id": "test-archive",
         "name": "Test Archive",
         "type": "rosetta-rest-api-v0",
-        "transferDestinationId": "test-archive",
         "details": {
             "url": "http://localhost:5050",
             "materialFlow": "000000",
@@ -58,6 +58,7 @@ def _testing_config(fixtures):
     }
 ]"""
 
+        CLEANUP_DISABLED = True
         ORCHESTRA_DAEMON_INTERVAL = 0.01
         ORCHESTRA_WORKER_INTERVAL = 0.01
         ORCHESTRA_WORKER_ARGS = {"messages_interval": 0.01}

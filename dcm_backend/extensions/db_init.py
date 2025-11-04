@@ -70,7 +70,6 @@ def _db_init(config, db, user_create, abort, result, requirements):
                 util.setup_demo_user_groups(db)
                 util.create_demo_templates(db)
                 util.create_demo_job_configs(db)
-                util.create_demo_jobs(db)
 
             if not hasattr(config, "TESTING") or not config.TESTING:
                 util.DemoData.print(True, config.DB_GENERATE_DEMO)

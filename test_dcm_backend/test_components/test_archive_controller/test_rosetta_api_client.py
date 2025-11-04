@@ -21,7 +21,7 @@ def _client():
     "auth",
     ["path", "file"]
 )
-def test_constructor_auth(auth, temp_folder):
+def test_constructor_auth(auth, file_storage):
     """
     Test constructor of `RosettaAPIClient0` with different values for
     `auth`.
@@ -29,8 +29,8 @@ def test_constructor_auth(auth, temp_folder):
     header = "Authorization"
     header_value = "Basic <pass>"
     if auth == "path":
-        (temp_folder / "test_header").write_text(f"{header}: {header_value}")
-        ac = RosettaAPIClient0(temp_folder / "test_header", "")
+        (file_storage / "test_header").write_text(f"{header}: {header_value}")
+        ac = RosettaAPIClient0(file_storage / "test_header", "")
     else:
         ac = RosettaAPIClient0(f"{header}: {header_value}", "")
 

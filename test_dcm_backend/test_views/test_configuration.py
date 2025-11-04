@@ -64,7 +64,7 @@ def test_get_job(no_orchestra_testing_config):
     assert response.mimetype == "application/json"
     assert response.json == JobConfig.from_row(
         config.db.get_row("job_configs", util.DemoData.job_config1).eval()
-    ).json | {"workspaceId": util.DemoData.workspace1}
+    ).json | {"IEs": 0, "workspaceId": util.DemoData.workspace1}
 
 
 def test_get_job_no_workspace(no_orchestra_testing_config, minimal_job_config):
@@ -87,7 +87,7 @@ def test_get_job_no_workspace(no_orchestra_testing_config, minimal_job_config):
         response.json
         == JobConfig.from_row(
             config.db.get_row("job_configs", job_config_id).eval()
-        ).json
+        ).json | {"IEs": 0}
     )
 
 
@@ -226,7 +226,7 @@ def test_post_job_with_scheduling(no_orchestra_testing_config):
 
 
 def test_post_job_with_scheduling_and_execution(
-    no_orchestra_testing_config, run_service, temp_folder
+    no_orchestra_testing_config, run_service, file_storage
 ):
     """
     Test endpoint `POST-/job/configure` of config-API with scheduled job
@@ -235,10 +235,10 @@ def test_post_job_with_scheduling_and_execution(
 
     token = {"value": str(uuid4()), "expires": False}
     file = str(uuid4())
-    assert not (temp_folder / file).exists()
+    assert not (file_storage / file).exists()
 
     def _process():
-        (temp_folder / file).touch()
+        (file_storage / file).touch()
         return jsonify(token), 201
 
     run_service(
@@ -263,10 +263,10 @@ def test_post_job_with_scheduling_and_execution(
     )
 
     time0 = time()
-    while not (temp_folder / file).exists() and time() - time0 < 3:
+    while not (file_storage / file).exists() and time() - time0 < 3:
         sleep(0.01)
 
-    assert (temp_folder / file).exists()
+    assert (file_storage / file).exists()
 
     assert (
         config.db.get_row("job_configs", response.json["id"]).eval()[
@@ -1152,11 +1152,11 @@ def test_delete_template(no_orchestra_testing_config, minimal_template_config):
     assert config.db.get_row("templates", t_id).eval() is None
 
 
-def test_list_hotfolders(no_orchestra_testing_config, temp_folder):
+def test_list_hotfolders(no_orchestra_testing_config, file_storage):
     """Test endpoint `OPTIONS-/template/hotfolder` of config-API."""
 
-    hotfolder1 = temp_folder / str(uuid4())
-    hotfolder2 = temp_folder / str(uuid4())
+    hotfolder1 = file_storage / str(uuid4())
+    hotfolder2 = file_storage / str(uuid4())
 
     hotfolder1.mkdir()
     hotfolder2.mkdir()
@@ -1188,12 +1188,12 @@ def test_list_hotfolders(no_orchestra_testing_config, temp_folder):
     }
 
 
-def test_list_hotfolder_directories(no_orchestra_testing_config, temp_folder):
+def test_list_hotfolder_directories(no_orchestra_testing_config, file_storage):
     """
     Test endpoint `OPTIONS-/template/hotfolder/directory` of config-API.
     """
 
-    hotfolder = temp_folder / str(uuid4())
+    hotfolder = file_storage / str(uuid4())
     subdir1 = hotfolder / "0"
     subdir2 = hotfolder / "1"
 
@@ -1249,12 +1249,12 @@ def test_list_hotfolder_directories(no_orchestra_testing_config, temp_folder):
     assert subdir2_info["linkedJobConfigs"] == [job_config_id]
 
 
-def test_new_hotfolder_directory(no_orchestra_testing_config, temp_folder):
+def test_new_hotfolder_directory(no_orchestra_testing_config, file_storage):
     """
     Test endpoint `POST-/template/hotfolder/directory` of config-API.
     """
 
-    hotfolder = temp_folder / str(uuid4())
+    hotfolder = file_storage / str(uuid4())
 
     class ConfigWithHotfolders(no_orchestra_testing_config):
         HOTFOLDER_SRC = dumps(
@@ -1337,7 +1337,6 @@ def test_list_archives(no_orchestra_testing_config):
                     "id": "0",
                     "name": "a",
                     "type": "rosetta-rest-api-v0",
-                    "transferDestinationId": "0a",
                     "details": {
                         "url": "",
                         "materialFlow": "",
@@ -1349,7 +1348,6 @@ def test_list_archives(no_orchestra_testing_config):
                     "id": "1",
                     "name": "b",
                     "type": "rosetta-rest-api-v0",
-                    "transferDestinationId": "1a",
                     "details": {
                         "url": "",
                         "materialFlow": "",

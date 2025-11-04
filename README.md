@@ -3,9 +3,11 @@
 The 'DCM Backend'-API provides functionality to
 * trigger an ingest in the archive-system,
 * collect the current ingest-status,
-* manage job/user/workspace/template configurations,
-* control job execution, and
-* authenticate local users.
+* control job execution,
+* download job-artifacts,
+* cleanup job-artifacts,
+* authenticate users, and
+* manage user/workspace/template/job configurations.
 
 This repository contains the corresponding Flask app definition.
 For the associated OpenAPI-document, please refer to the sibling package [`dcm-backend-api`](https://github.com/lzv-nrw/dcm-backend-api).
@@ -80,6 +82,17 @@ pytest -v -s
 ## Environment/Configuration
 Service-specific environment variables are
 
+### Artifact cleanup
+The backend-service can be used to automatically clean up the shared file-storage.
+This is implemented by periodically checking for new contents in the targeted directories.
+Once a new object is detected, it is assigned an expiration-datetime (stored in the database).
+If an object exceeds this expiration-datetime, it is deleted during the next scheduled run of the cleanup-routine.
+The following variables can be used to configure that procedure
+* `CLEANUP_DISABLED` [DEFAULT 0]: whether to disable the automated cleanup
+* `CLEANUP_TARGETS` [DEFAULT '["ie", "ip", "pip", "sip"]']: targeted directories with automated cleanup as a JSON-array of strings; relative to shared file storage
+* `CLEANUP_INTERVAL` [DEFAULT 3600]: interval of the cleanup-routine in seconds
+* `CLEANUP_ARTIFACT_TTL` [DEFAULT 604800 (7 days)]: duration until an artifact expires (after detection) in seconds
+
 ### Database
 * `DB_LOAD_SCHEMA` [DEFAULT 0]: whether the database should be initialized with the database schema
 * `DB_GENERATE_DEMO` [DEFAULT 0]: whether database-tables and related configuration should be filled with demo-data at startup (also includes `DB_GENERATE_DEMO_USERS`)
@@ -114,12 +127,9 @@ Service-specific environment variables are
     "name": "<display name for archive>",
     "description": "<(optional) description for archive>",
     "type": "<archive type (see below)>",
-    "transferDestinationId": "<transfer destination id>",
     "details": { /* type-specific additional settings */ }
   }
   ```
-
-  Note that the `"transferDestinationId"` is passed on to the [Transfer Module](https://github.com/lzv-nrw/dcm-transfer-module) during execution of a job with the given target-archive.
 
   Currently, the following archive types are available:
   * `"rosetta-rest-api-v0"`:
@@ -146,12 +156,17 @@ Service-specific environment variables are
 * `JOB_PROCESSOR_HOST` [DEFAULT http://localhost:8087] Job Processor host address
 * `JOB_PROCESSOR_POLL_INTERVAL` [DEFAULT 1.0] Job Processor polling interval
 
-### Ingest (Archive Controller)
-* `ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE` [DEFAULT null]: id of a default target-archive during an ingest (used if the request contains no id)
+### Artifact-API
+* `ARTIFACT_COMPRESSION` [DEFAULT 0]: whether to use compression while bundling job-artifacts
+* `ARTIFACT_BUNDLE_DESTINATION` [DEFAULT "bundles"]: output destination for artifact-bundles
+* `ARTIFACT_FILE_MAX_SIZE` [DEFAULT 0]: maximum allowed size of individual file (before compression) in B; a value of zero corresponds to no limit
+* `ARTIFACT_BUNDLE_MAX_SIZE` [DEFAULT 0]: maximum allowed size of bundle (before compression) in B; a value of zero corresponds to no limit
+* `ARTIFACT_SOURCES` [DEFAULT '["ie", "ip", "pip", "sip"]']: accepted source-directories for bundle-targets as a JSON-array of strings; relative to shared file storage (a target in a bundle-request needs to be located inside one of these source directories to be valid)
 
 Additionally this service provides environment options for
 * `BaseConfig`,
-* `OrchestratedAppConfig`, and
+* `OrchestratedAppConfig`,
+* `FSConfig`, and
 * `DBConfig`
 
 as listed [here](https://github.com/lzv-nrw/dcm-common#app-configuration).

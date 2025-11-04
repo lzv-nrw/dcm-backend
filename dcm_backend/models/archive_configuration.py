@@ -135,8 +135,6 @@ class ArchiveConfiguration(DataModel):
     name -- display-name for the archive
     type_ -- archive type (see also ArchiveAPI-enum)
     details -- type_-dependent configuration details
-    transfer_destination_id -- identifier for transfer destination
-                               (passed on to Transfer Module)
     description -- description of the archive
                    (default None)
     """
@@ -145,7 +143,6 @@ class ArchiveConfiguration(DataModel):
     name: str
     type_: ArchiveAPI
     details: RosettaRestV0Details
-    transfer_destination_id: str
     description: Optional[str] = None
 
     @DataModel.serialization_handler("id_", "id")
@@ -160,14 +157,6 @@ class ArchiveConfiguration(DataModel):
         """Handles `type_`-serialization."""
         return value.value
 
-    @DataModel.serialization_handler(
-        "transfer_destination_id", "transferDestinationId"
-    )
-    @classmethod
-    def transfer_destination_id_serialization_handler(cls, value):
-        """Handles `transfer_destination_id`-serialization."""
-        return value
-
     # custom implementation to properly handle type_-dependent details
     @classmethod
     def from_json(cls, json) -> "ArchiveConfiguration":
@@ -178,6 +167,5 @@ class ArchiveConfiguration(DataModel):
             details=ARCHIVE_CONFIGURATION_DETAILS_MAP[
                 json["type"]
             ].from_json(json["details"]),
-            transfer_destination_id=json["transferDestinationId"],
             description=json.get("description"),
         )

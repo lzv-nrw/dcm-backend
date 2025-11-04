@@ -7,6 +7,7 @@ from data_plumber_http.settings import Responses
 
 from dcm_backend.models import (
     IngestConfig,
+    BundleConfig,
     JobConfig,
     UserConfig,
     UserCredentials,
@@ -100,6 +101,96 @@ def test_post_ingest_handler(json, status):
         print(output.last_message)
     else:
         assert isinstance(output.data.value["ingest"], IngestConfig)
+
+
+@pytest.mark.parametrize(
+    ("json", "status"),
+    (
+        pytest_args := [
+            ({"no-bundle": None}, 400),
+            ({"bundle": {}}, 400),  # missing targets
+            (
+                {
+                    "bundle": {
+                        "targets": None,
+                    },
+                },
+                422,
+            ),
+            (
+                {
+                    "bundle": {
+                        "targets": [],
+                    },
+                },
+                Responses.GOOD.status,
+            ),
+            (
+                {
+                    "bundle": {
+                        "targets": [None],
+                    },
+                },
+                422,
+            ),
+            (
+                {
+                    "bundle": {
+                        "targets": [{}],
+                    },
+                },
+                400,
+            ),
+            (
+                {
+                    "bundle": {
+                        "targets": [{"path": "b"}],
+                    },
+                },
+                404,
+            ),
+            (
+                {
+                    "bundle": {
+                        "targets": [{"path": "a", "asPath": None}],
+                    },
+                },
+                422,
+            ),
+            (
+                {
+                    "bundle": {
+                        "targets": [{"path": "a", "asPath": "b"}],
+                    },
+                },
+                Responses.GOOD.status,
+            ),
+            (
+                {
+                    "bundle": {
+                        "targets": [],
+                    },
+                    "token": "37ee72d6-80ab-4dcd-a68d-f8d32766c80d",
+                    "callbackUrl": "https://lzv.nrw/callback",
+                },
+                Responses.GOOD.status,
+            ),
+        ]
+    ),
+    ids=[f"stage {i+1}" for i in range(len(pytest_args))],
+)
+def test_get_post_artifact_handler(json, status, file_storage):
+    "Test `get_post_artifact_handler`."
+
+    (file_storage / "a").mkdir(exist_ok=True)
+
+    output = handlers.get_post_artifact_handler(file_storage).run(json=json)
+
+    assert output.last_status == status
+    if status != Responses.GOOD.status:
+        print(output.last_message)
+    else:
+        assert isinstance(output.data.value["bundle"], BundleConfig)
 
 
 @pytest.mark.parametrize(
@@ -988,22 +1079,59 @@ def test_list_jobs_handler(json, status):
         pytest_args := [
             # bad types do not need testing since this is a handler for
             # query-params
-            ({}, Responses.GOOD.status),
-            ({"unknown": ""}, 400),
-            ({"id": "value"}, Responses.GOOD.status),
-            ({"token": "value"}, Responses.GOOD.status),
-            ({"success": "true'"}, 422),
-            ({"success": "abc"}, 422),
-            ({"success": "true"}, Responses.GOOD.status),
-            ({"success": "false"}, Responses.GOOD.status),
+            ({}, 400),
+            ({"jobConfigId": "a"}, Responses.GOOD.status),
+            ({"jobConfigId": "a", "unknown": ""}, 400),
+            ({"jobConfigId": "a", "filterByStatus": "unknown"}, 422),
+            ({"jobConfigId": "a", "filterByStatus": "complete"}, Responses.GOOD.status),
+            ({"jobConfigId": "a", "filterByText": "test"}, Responses.GOOD.status),
+            ({"jobConfigId": "a", "sort": "unknown"}, 422),
+            ({"jobConfigId": "a", "sort": "datetimeChanged"}, Responses.GOOD.status),
+            ({"jobConfigId": "a", "range": "abc"}, 422),
+            ({"jobConfigId": "a", "range": "0..100"}, Responses.GOOD.status),
+            ({"jobConfigId": "a", "count": "unknown"}, 422),
+            ({"jobConfigId": "a", "count": "true"}, Responses.GOOD.status),
         ]
     ),
     ids=[f"stage {i+1}" for i in range(len(pytest_args))],
 )
-def test_get_records_handler(json, status):
-    """Test `get_records_handler`."""
+def test_get_ies_handler(json, status):
+    """Test `get_ies_handler`."""
 
-    output = handlers.get_records_handler.run(json=json)
+    output = handlers.get_ies_handler.run(json=json)
+
+    assert output.last_status == status
+    if status != Responses.GOOD.status:
+        print(output.last_message)
+
+
+@pytest.mark.parametrize(
+    ("json", "status"),
+    (
+        pytest_args := [
+            ({}, 400),
+            ({"id": None}, 422),
+            ({"id": "a"}, Responses.GOOD.status),
+            ({"id": "a", "unknown": None}, 400),
+            ({"id": "a", "clear": None}, 422),
+            ({"id": "a", "clear": True}, Responses.GOOD.status),
+            ({"id": "a", "ignore": None}, 422),
+            ({"id": "a", "ignore": True}, Responses.GOOD.status),
+            ({"id": "a", "planAsBitstream": None}, 422),
+            ({"id": "a", "planAsBitstream": True}, Responses.GOOD.status),
+            ({"id": "a", "planToSkipObjectValidation": None}, 422),
+            (
+                {"id": "a", "planToSkipObjectValidation": True},
+                Responses.GOOD.status,
+            ),
+        ]
+    ),
+    ids=[f"stage {i+1}" for i in range(len(pytest_args))],
+)
+def test_post_ie_plan_handler(json, status):
+    """Test `post_ie_plan_handler`."""
+
+    output = handlers.post_ie_plan_handler.run(json=json)
 
     assert output.last_status == status
     if status != Responses.GOOD.status:

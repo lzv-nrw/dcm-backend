@@ -15,7 +15,7 @@ from dcm_common import services
 
 from dcm_backend import handlers
 from dcm_backend.models import (
-    Report,
+    IngestReport,
     IngestConfig,
     RosettaTarget,
     ArchiveAPI,
@@ -33,7 +33,7 @@ class IngestView(services.OrchestratedView):
 
     def register_job_types(self):
         self.config.worker_pool.register_job_type(
-            self.NAME, self.ingest, Report
+            self.NAME, self.ingest, IngestReport
         )
 
     def configure_bp(self, bp: Blueprint, *args, **kwargs) -> None:
@@ -113,16 +113,12 @@ class IngestView(services.OrchestratedView):
         ):
             """Submit dir for ingesting in the archive system."""
             # additional validation (configuration and archive-specific)
-            # * load default id if none has been provided
+            # * check for archive_id
             if ingest.archive_id is None:
-                if self.config.ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE is None:
-                    return Response(
-                        "Submission rejected: Missing archive id.",
-                        mimetype="text/plain",
-                        status=400,
-                    )
-                ingest.archive_id = (
-                    self.config.ARCHIVE_CONTROLLER_DEFAULT_ARCHIVE
+                return Response(
+                    "Submission rejected: Missing archive id.",
+                    mimetype="text/plain",
+                    status=400,
                 )
             # * check known archive ids
             if ingest.archive_id not in self.config.archives:
@@ -159,7 +155,7 @@ class IngestView(services.OrchestratedView):
                                 "callback_url": callback_url,
                             },
                         ),
-                        report=Report(
+                        report=IngestReport(
                             host=request.host_url, args=request.json
                         ),
                     ),

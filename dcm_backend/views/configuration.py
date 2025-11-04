@@ -96,7 +96,17 @@ class ConfigurationView(View):
                 ),
                 None,
             )
-            # TODO: fetch associated jobs (reports)
+            # * fetch number of IEs
+            config.ies = self.config.db.encode(
+                self.config.db.custom_cmd(
+                    f"""
+                    SELECT COUNT(*) FROM ies
+                    WHERE job_config_id = {self.config.db.decode(id_, 'text')}
+                    """,
+                    clear_schema_cache=False,
+                ).eval("fetching number of IEs")[0][0],
+                "integer",
+            )
             return jsonify(config.json), 200
 
     def _post_job_config(self, bp: Blueprint):

@@ -1,6 +1,8 @@
 """Input handlers for the 'DCM Backend'-app."""
 
 from typing import Any
+from pathlib import Path
+
 from data_plumber import Pipeline
 from data_plumber_http import (
     Object,
@@ -13,10 +15,12 @@ from data_plumber_http import (
     FileSystemObject,
 )
 from data_plumber_http.settings import Responses
-from dcm_common.services import UUID
+from dcm_common.services import UUID, TargetPath
 
 from dcm_backend.models import (
     IngestConfig,
+    BundleConfig,
+    BundleTarget,
     RosettaTarget,
     JobConfig,
     UserConfig,
@@ -108,6 +112,41 @@ get_ingest_handler = Object(
 ).assemble()
 
 
+def get_post_artifact_handler(file_storage: Path):
+    """Returns parameterized handler (based on file_storage)."""
+    return Object(
+        properties={
+            Property("bundle", required=True): Object(
+                model=BundleConfig,
+                properties={
+                    Property("targets", required=True): Array(
+                        items=Object(
+                            model=BundleTarget,
+                            properties={
+                                Property("path", required=True): TargetPath(
+                                    _relative_to=file_storage,
+                                    cwd=file_storage,
+                                    exists=True,
+                                ),
+                                Property(
+                                    "asPath", "as_path"
+                                ): FileSystemObject(),
+                            },
+                            accept_only=["path", "asPath"],
+                        )
+                    ),
+                },
+                accept_only=["targets"],
+            ),
+            Property("token"): UUID(),
+            Property("callbackUrl", name="callback_url"): Url(
+                schemes=["http", "https"]
+            ),
+        },
+        accept_only=["bundle", "token", "callbackUrl"],
+    ).assemble()
+
+
 def get_config_id_handler(required: bool = True, also_allow: list[str] = None):
     """
     Returns parameterized handler
@@ -117,7 +156,9 @@ def get_config_id_handler(required: bool = True, also_allow: list[str] = None):
                 (default True)
     """
     return Object(
-        properties={Property("id", "id_", required=required): String()},
+        properties={
+            Property("id", "id_", required=required): String(pattern=r".+")
+        },
         accept_only=["id"] + (also_allow or []),
     ).assemble()
 
@@ -391,13 +432,60 @@ list_jobs_handler = Object(
 ).assemble()
 
 
-get_records_handler = Object(
+get_ies_handler = Object(
     properties={
-        Property("token"): String(),
-        Property("id", "id_"): String(),
-        Property("success"): String(enum=["true", "false"]),
+        Property("jobConfigId", "job_config_id", required=True): String(),
+        Property("filterByStatus", "filter_by_status"): String(
+            enum=[
+                "complete",
+                "inProcess",
+                "validationError",
+                "error",
+                "ignored",
+            ]
+        ),
+        Property("filterByText", "filter_by_text"): String(),
+        Property("sort", default="datetimeChanged"): String(
+            enum=[
+                "datetimeChanged",
+                "originSystemId",
+                "externalId",
+                "archiveIeId",
+                "archiveSipId",
+                "status",
+            ]
+        ),
+        Property("range", "range_"): String(pattern=r"([0-9]+)\.\.([0-9]+)"),
+        Property("count", default="false"): String(enum=["true", "false"]),
     },
-    accept_only=["token", "id", "success"],
+    accept_only=[
+        "jobConfigId",
+        "filterByStatus",
+        "filterByText",
+        "sort",
+        "range",
+        "count",
+    ],
+).assemble()
+
+
+post_ie_plan_handler = Object(
+    properties={
+        Property("id", "id_", required=True): String(),
+        Property("clear"): Boolean(),
+        Property("ignore"): Boolean(),
+        Property("planAsBitstream", "plan_as_bitstream"): Boolean(),
+        Property(
+            "planToSkipObjectValidation", "plan_to_skip_object_validation"
+        ): Boolean(),
+    },
+    accept_only=[
+        "id",
+        "clear",
+        "ignore",
+        "planAsBitstream",
+        "planToSkipObjectValidation",
+    ],
 ).assemble()
 
 

@@ -10,5 +10,5 @@ from dcm_backend.models.ingest_result import IngestResult
 
 
 @dataclass
-class Report(BaseReport):
+class IngestReport(BaseReport):
     data: IngestResult = field(default_factory=IngestResult)

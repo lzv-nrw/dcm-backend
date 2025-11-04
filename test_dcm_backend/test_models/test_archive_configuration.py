@@ -48,7 +48,6 @@ test_archive_configuration_json = get_model_serialization_test(
                 "name": "n",
                 "type_": ArchiveAPI.ROSETTA_REST_V0,
                 "details": RosettaRestV0Details("", "", "", basic_auth=""),
-                "transfer_destination_id": "1",
             },
         ),
         (
@@ -58,7 +57,6 @@ test_archive_configuration_json = get_model_serialization_test(
                 "name": "n",
                 "type_": ArchiveAPI.ROSETTA_REST_V0,
                 "details": RosettaRestV0Details("", "", "", basic_auth=""),
-                "transfer_destination_id": "1",
                 "description": "d",
             },
         ),

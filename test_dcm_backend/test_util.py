@@ -9,7 +9,7 @@ from dcm_backend import util
 from dcm_backend.models import ArchiveAPI
 
 
-def test_load_hotfolders_from_string_basic(temp_folder):
+def test_load_hotfolders_from_string_basic(file_storage):
     """Test function `load_hotfolders_from_string`."""
 
     hotfolders = util.load_hotfolders_from_string(
@@ -17,11 +17,11 @@ def test_load_hotfolders_from_string_basic(temp_folder):
             [
                 {
                     "id": "0",
-                    "mount": str(temp_folder),
+                    "mount": str(file_storage),
                     "name": "a",
                     "description": "b",
                 },
-                {"id": "1", "mount": str(temp_folder), "name": "c"},
+                {"id": "1", "mount": str(file_storage), "name": "c"},
             ]
         )
     )
@@ -30,11 +30,11 @@ def test_load_hotfolders_from_string_basic(temp_folder):
     assert "0" in hotfolders
     assert "1" in hotfolders
     assert hotfolders["0"].id_ == "0"
-    assert hotfolders["0"].mount == temp_folder
+    assert hotfolders["0"].mount == file_storage
     assert hotfolders["0"].name == "a"
     assert hotfolders["0"].description == "b"
     assert hotfolders["1"].id_ == "1"
-    assert hotfolders["1"].mount == temp_folder
+    assert hotfolders["1"].mount == file_storage
     assert hotfolders["1"].name == "c"
     assert hotfolders["1"].description is None
 
@@ -46,13 +46,13 @@ def test_load_hotfolders_from_string_bad_id():
     print(exc_info.value)
 
 
-def test_load_hotfolders_from_string_duplicate_id(temp_folder):
+def test_load_hotfolders_from_string_duplicate_id(file_storage):
     """Test function `load_hotfolders_from_string`."""
     with pytest.raises(ValueError) as exc_info:
         util.load_hotfolders_from_string(
             json.dumps(
                 [
-                    {"id": "0", "mount": str(temp_folder), "name": "a"},
+                    {"id": "0", "mount": str(file_storage), "name": "a"},
                     {"id": "0"},
                 ]
             )
@@ -67,20 +67,20 @@ def test_load_hotfolders_from_string_not_hotfolder():
     print(exc_info.value)
 
 
-def test_load_hotfolders_from_file_basic(temp_folder):
+def test_load_hotfolders_from_file_basic(file_storage):
     """Test function `load_hotfolders_from_file`."""
 
-    file = temp_folder / str(uuid4())
+    file = file_storage / str(uuid4())
     file.write_text(
         json.dumps(
             [
                 {
                     "id": "0",
-                    "mount": str(temp_folder),
+                    "mount": str(file_storage),
                     "name": "a",
                     "description": "b",
                 },
-                {"id": "1", "mount": str(temp_folder), "name": "c"},
+                {"id": "1", "mount": str(file_storage), "name": "c"},
             ]
         ),
         encoding="utf-8",
@@ -92,11 +92,11 @@ def test_load_hotfolders_from_file_basic(temp_folder):
     assert "0" in hotfolders
     assert "1" in hotfolders
     assert hotfolders["0"].id_ == "0"
-    assert hotfolders["0"].mount == temp_folder
+    assert hotfolders["0"].mount == file_storage
     assert hotfolders["0"].name == "a"
     assert hotfolders["0"].description == "b"
     assert hotfolders["1"].id_ == "1"
-    assert hotfolders["1"].mount == temp_folder
+    assert hotfolders["1"].mount == file_storage
     assert hotfolders["1"].name == "c"
     assert hotfolders["1"].description is None
 
@@ -107,7 +107,6 @@ def _minimal_archive_configuration():
         "id": "0",
         "name": "a",
         "type": ArchiveAPI.ROSETTA_REST_V0.value,
-        "transferDestinationId": "0a",
         "details": {
             "url": "",
             "materialFlow": "",
@@ -125,7 +124,6 @@ def test_load_archive_configurations_from_string_basic():
         "name": "a",
         "description": "b",
         "type": ArchiveAPI.ROSETTA_REST_V0.value,
-        "transferDestinationId": "0a",
         "details": {
             "url": "",
             "materialFlow": "",
@@ -139,7 +137,6 @@ def test_load_archive_configurations_from_string_basic():
         "id": "1",
         "name": "a",
         "type": ArchiveAPI.ROSETTA_REST_V0.value,
-        "transferDestinationId": "1a",
         "details": {
             "url": "",
             "materialFlow": "",
@@ -206,11 +203,11 @@ def test_load_archive_configurations_from_string_not_an_archive(
 
 
 def test_load_archive_configurations_from_file_basic(
-    temp_folder, minimal_archive_configuration
+    file_storage, minimal_archive_configuration
 ):
     """Test function `load_archive_configurations_from_file`."""
 
-    file = temp_folder / str(uuid4())
+    file = file_storage / str(uuid4())
     file.write_text(
         json.dumps([minimal_archive_configuration]), encoding="utf-8"
     )

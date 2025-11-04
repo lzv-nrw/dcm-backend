@@ -19,131 +19,6 @@ class TriggerType(Enum):
 
 
 @dataclass
-class Record(DataModel):
-    """Record datamodel."""
-    report_id: str
-    success: bool
-    token: Optional[str] = None
-    external_id: Optional[str] = None
-    origin_system_id: Optional[str] = None
-    sip_id: Optional[str] = None
-    ie_id: Optional[str] = None
-    datetime_processed: Optional[str] = None
-
-    @DataModel.serialization_handler("report_id", "reportId")
-    @classmethod
-    def report_id_serialization_handler(cls, value):
-        """Handles `report_id`-serialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.deserialization_handler("report_id", "reportId")
-    @classmethod
-    def report_id_deserialization_handler(cls, value):
-        """Handles `report_id`-deserialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.serialization_handler("external_id", "externalId")
-    @classmethod
-    def external_id_serialization(cls, value):
-        """Performs `external_id`-serialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.deserialization_handler("external_id", "externalId")
-    @classmethod
-    def external_id_deserialization(cls, value):
-        """Performs `external_id`-deserialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.serialization_handler("origin_system_id", "originSystemId")
-    @classmethod
-    def origin_system_id_serialization(cls, value):
-        """Performs `origin_system_id`-serialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.deserialization_handler("origin_system_id", "originSystemId")
-    @classmethod
-    def origin_system_id_deserialization(cls, value):
-        """Performs `origin_system_id`-deserialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.serialization_handler("sip_id", "sipId")
-    @classmethod
-    def sip_id_serialization(cls, value):
-        """Performs `sip_id`-serialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.deserialization_handler("sip_id", "sipId")
-    @classmethod
-    def sip_id_deserialization(cls, value):
-        """Performs `sip_id`-deserialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.serialization_handler("ie_id", "ieId")
-    @classmethod
-    def ie_id_serialization(cls, value):
-        """Performs `ie_id`-serialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.deserialization_handler("ie_id", "ieId")
-    @classmethod
-    def ie_id_deserialization(cls, value):
-        """Performs `ie_id`-deserialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.serialization_handler("datetime_processed", "datetimeProcessed")
-    @classmethod
-    def datetime_processed_serialization(cls, value):
-        """Performs `datetime_processed`-serialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @DataModel.deserialization_handler(
-        "datetime_processed", "datetimeProcessed"
-    )
-    @classmethod
-    def datetime_processed_deserialization(cls, value):
-        """Performs `datetime_processed`-deserialization."""
-        if value is None:
-            DataModel.skip()
-        return value
-
-    @classmethod
-    def from_row(cls, row: Mapping) -> "Record":
-        """Initialize instance from database row."""
-        return cls(
-            report_id=row["report_id"],
-            success=row["success"],
-            token=row.get("job_token"),
-            origin_system_id=row.get("origin_system_id"),
-            external_id=row.get("external_id"),
-            sip_id=row.get("sip_id"),
-            ie_id=row.get("ie_id"),
-            datetime_processed=row.get("datetime_processed"),
-        )
-
-
-@dataclass
 class JobInfo(DataModel):
     """JobInfo datamodel."""
     token: str
@@ -158,7 +33,6 @@ class JobInfo(DataModel):
     report: Optional[JSONObject] = None
     template_id: Optional[str] = None
     workspace_id: Optional[str] = None
-    records: Optional[list[Record]] = None
 
     @DataModel.serialization_handler("job_config_id", "jobConfigId")
     @classmethod
@@ -289,22 +163,6 @@ class JobInfo(DataModel):
         if value is None:
             DataModel.skip()
         return value
-
-    @DataModel.serialization_handler("records", "records")
-    @classmethod
-    def records_serialization_handler(cls, value):
-        """Handles `records`-serialization."""
-        if value is None:
-            DataModel.skip()
-        return [record.json for record in value]
-
-    @DataModel.deserialization_handler("records", "records")
-    @classmethod
-    def records_deserialization_handler(cls, value):
-        """Handles `records`-deserialization."""
-        if value is None:
-            DataModel.skip()
-        return [Record.from_json(record) for record in value]
 
     @classmethod
     def from_row(cls, row: Mapping) -> "JobInfo":

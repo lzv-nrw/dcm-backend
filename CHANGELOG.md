@@ -1,6 +1,18 @@
 # Changelog
 
-## [5.0.0] - 2025-??-??
+## [6.0.0] - 2025-11-04
+
+### Changed
+
+- **Breaking:** migrated to Backend API v5 (new & changed endpoints in `job`-API)
+
+### Added
+
+- added `cleanup`-extension to clean up shared file storage
+- implemented initial `artifact`-API
+- added connection to file-storage
+
+## [5.0.0] - 2025-10-01
 
 ### Changed
 
