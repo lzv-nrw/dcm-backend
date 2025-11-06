@@ -456,7 +456,12 @@ def test_user_options(no_orchestra_testing_config):
     assert response.status_code == 200
     assert response.mimetype == "application/json"
     assert sorted(response.json) == sorted(
-        [v for k, v in util.DemoData.__dict__.items() if "user" in k]
+        [
+            util.DemoData.user0,
+            util.DemoData.user1,
+            util.DemoData.user2,
+            util.DemoData.user3,
+        ]
     )
 
 

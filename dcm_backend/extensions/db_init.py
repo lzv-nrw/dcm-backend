@@ -48,7 +48,7 @@ def _db_init(config, db, user_create, abort, result, requirements):
         else:
             print_status("Skip loading SQL-schema (already initialized).")
 
-    if config.DB_GENERATE_DEMO or config.DB_GENERATE_DEMO_USERS:
+    if config.DB_GENERATE_DEMO:
         if (
             "deployment" not in db.get_table_names().eval("db initialization")
             or len(
@@ -58,6 +58,7 @@ def _db_init(config, db, user_create, abort, result, requirements):
             )
             == 0
         ):
+            util.DemoData.generate_demo_users = config.DB_GENERATE_DEMO_USERS
             if config.DB_DEMO_ADMIN_PW is not None:
                 util.DemoData.admin_password = config.DB_DEMO_ADMIN_PW
 
@@ -65,11 +66,10 @@ def _db_init(config, db, user_create, abort, result, requirements):
             util.create_demo_users(db, user_create)
 
             # setup demo-data
-            if config.DB_GENERATE_DEMO:
-                util.create_demo_workspaces(db)
-                util.setup_demo_user_groups(db)
-                util.create_demo_templates(db)
-                util.create_demo_job_configs(db)
+            util.create_demo_workspaces(db)
+            util.setup_demo_user_groups(db)
+            util.create_demo_templates(db)
+            util.create_demo_job_configs(db)
 
             if not hasattr(config, "TESTING") or not config.TESTING:
                 util.DemoData.print(True, config.DB_GENERATE_DEMO)

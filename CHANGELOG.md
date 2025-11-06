@@ -1,5 +1,13 @@
 # Changelog
 
+## [6.1.0] - 2025-11-06
+
+### Changed
+
+- changed how environment variables for database-demo are interpreted
+
+  if `DB_GENERATE_DEMO` an admin-user is created; if also `DB_GENERATE_DEMO_USERS` (default) additional curator-users are created
+
 ## [6.0.0] - 2025-11-04
 
 ### Changed

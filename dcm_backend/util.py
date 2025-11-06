@@ -137,6 +137,7 @@ class DemoData:
 
     admin_password = default_admin_password
     user0 = str(uuid3(uuid_namespace, name="user0"))
+    generate_demo_users = True
     user1 = str(uuid3(uuid_namespace, name="user1"))
     user2 = str(uuid3(uuid_namespace, name="user2"))
     user3 = str(uuid3(uuid_namespace, name="user3"))
@@ -164,10 +165,15 @@ class DemoData:
                 ),
             ),
             ("user0", cls.user0),
-            ("user1", cls.user1),
-            ("user2", cls.user2),
-            ("user3", cls.user3),
-        ]
+        ] + (
+            [
+                ("user1", cls.user1),
+                ("user2", cls.user2),
+                ("user3", cls.user3),
+            ]
+            if cls.generate_demo_users
+            else []
+        )
         other_attributes = [
             ("workspace1", cls.workspace1),
             ("workspace2", cls.workspace2),
@@ -227,46 +233,51 @@ def create_demo_users(db: SQLAdapter, user_create: Callable):
             ),
             password=DemoData.admin_password,
         ),
-        user_create(
-            config=UserConfig(
-                id_=DemoData.user1,
-                external_id="albert",
-                username="einstein",
-                firstname="Albert",
-                lastname="Einstein",
-                email="einstein@lzv.nrw",
-                user_created=DemoData.user0,
-                datetime_created=now().isoformat(),
+    ] + (
+        [
+            user_create(
+                config=UserConfig(
+                    id_=DemoData.user1,
+                    external_id="albert",
+                    username="einstein",
+                    firstname="Albert",
+                    lastname="Einstein",
+                    email="einstein@lzv.nrw",
+                    user_created=DemoData.user0,
+                    datetime_created=now().isoformat(),
+                ),
+                password="relativity",
             ),
-            password="relativity",
-        ),
-        user_create(
-            config=UserConfig(
-                id_=DemoData.user2,
-                external_id="maria",
-                username="curie",
-                firstname="Maria",
-                lastname="Skłodowska-Curie",
-                email="curie@lzv.nrw",
-                user_created=DemoData.user0,
-                datetime_created=now().isoformat(),
+            user_create(
+                config=UserConfig(
+                    id_=DemoData.user2,
+                    external_id="maria",
+                    username="curie",
+                    firstname="Maria",
+                    lastname="Skłodowska-Curie",
+                    email="curie@lzv.nrw",
+                    user_created=DemoData.user0,
+                    datetime_created=now().isoformat(),
+                ),
+                password="radioactivity",
             ),
-            password="radioactivity",
-        ),
-        user_create(
-            config=UserConfig(
-                id_=DemoData.user3,
-                external_id="richard",
-                username="feynman",
-                firstname="Richard",
-                lastname="Feynman",
-                email="feynman@lzv.nrw",
-                user_created=DemoData.user0,
-                datetime_created=now().isoformat(),
+            user_create(
+                config=UserConfig(
+                    id_=DemoData.user3,
+                    external_id="richard",
+                    username="feynman",
+                    firstname="Richard",
+                    lastname="Feynman",
+                    email="feynman@lzv.nrw",
+                    user_created=DemoData.user0,
+                    datetime_created=now().isoformat(),
+                ),
+                password="superfluidity",
             ),
-            password="superfluidity",
-        ),
-    ]:
+        ]
+        if DemoData.generate_demo_users
+        else []
+    ):
         user.secrets.user_id = db.insert(
             "user_configs", user.config.row
         ).eval()
@@ -292,11 +303,23 @@ def setup_demo_user_groups(db: SQLAdapter):
                    user-configuration
     """
 
-    for user_id, groups in {
-        DemoData.user0: [GroupMembership("admin")],
-        DemoData.user1: [GroupMembership("curator", DemoData.workspace1)],
-        DemoData.user2: [GroupMembership("curator", DemoData.workspace2)],
-    }.items():
+    for user_id, groups in (
+        {
+            DemoData.user0: [GroupMembership("admin")],
+        }
+        | (
+            {
+                DemoData.user1: [
+                    GroupMembership("curator", DemoData.workspace1)
+                ],
+                DemoData.user2: [
+                    GroupMembership("curator", DemoData.workspace2)
+                ],
+            }
+            if DemoData.generate_demo_users
+            else {}
+        )
+    ).items():
         for group in groups:
             db.insert(
                 "user_groups",
@@ -412,7 +435,9 @@ def create_demo_job_configs(db: SQLAdapter):
                     "end": "2099-01-01T00:00:00+01:00",
                     "repeat": {"unit": "day", "interval": 1},
                 },
-                "userCreated": DemoData.user1,
+                "userCreated": (
+                    DemoData.user1 if DemoData.generate_demo_users else None
+                ),
                 "datetimeCreated": now().isoformat(),
             }
         ),

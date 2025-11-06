@@ -461,9 +461,7 @@ def test_configure_user(
 
     # list users
     users = config_sdk.list_users()
-    assert len(users) == 1 + len(
-        [v for k, v in util.DemoData.__dict__.items() if "user" in k]
-    )
+    assert len(users) == 5
     assert user_id in users
 
     # delete user

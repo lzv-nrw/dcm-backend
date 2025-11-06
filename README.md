@@ -95,12 +95,14 @@ The following variables can be used to configure that procedure
 
 ### Database
 * `DB_LOAD_SCHEMA` [DEFAULT 0]: whether the database should be initialized with the database schema
-* `DB_GENERATE_DEMO` [DEFAULT 0]: whether database-tables and related configuration should be filled with demo-data at startup (also includes `DB_GENERATE_DEMO_USERS`)
-* `DB_GENERATE_DEMO_USERS` [DEFAULT 0]: whether demo users are created at startup
+* `DB_GENERATE_DEMO` [DEFAULT 0]: whether database-tables and related configuration should be filled with demo-data at startup
 
-  Three regular users are created. User 'einstein' with password 'relativity', user 'curie' with password 'radioactivity',
-  and user 'feynman' with password 'superfluidity'.
-  Furthermore, an administrator called 'admin' is created, the corresponding password is printed to stdout on app-startup (see also `DB_DEMO_ADMIN_PW`).
+  This includes an administrator account.
+  The randomized password is printed to stdout after data has been generated (see also `DB_DEMO_ADMIN_PW`).
+* `DB_GENERATE_DEMO_USERS` [DEFAULT 1]: whether additional demo users are created at startup (only applies if `DB_GENERATE_DEMO` is set)
+
+  This includes three regular users.
+  User 'einstein' with password 'relativity', user 'curie' with password 'radioactivity', and user 'feynman' with password 'superfluidity'.
 * `DB_DEMO_ADMIN_PW` [DEFAULT null] if set, the generated administrator-account gets assigned this password instead of a random one
 * `DB_STRICT_SCHEMA_VERSION` [DEFAULT 0] whether to enforce matching database schema version with respect to currently installed `dcm-database`
 
