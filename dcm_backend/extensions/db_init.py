@@ -63,6 +63,9 @@ def _db_init(config, db, user_create, abort, result, requirements):
                 util.DemoData.admin_password = config.DB_DEMO_ADMIN_PW
 
             # setup demo-users
+            util.DemoData.user1_password = config.DB_DEMO_EINSTEIN_PW
+            util.DemoData.user2_password = config.DB_DEMO_CURIE_PW
+            util.DemoData.user3_password = config.DB_DEMO_FEYNMAN_PW
             util.create_demo_users(db, user_create)
 
             # setup demo-data
@@ -93,7 +96,7 @@ def _db_init(config, db, user_create, abort, result, requirements):
                 for row in db.get_column("deployment", "schema_version").eval()
                 if row is not None
             ),
-            "unkown",
+            "unknown",
         )
     except ValueError as exc_info:
         handler(f"Unable to validate schema version ({exc_info}).")

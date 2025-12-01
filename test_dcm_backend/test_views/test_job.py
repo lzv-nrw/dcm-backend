@@ -289,151 +289,156 @@ def test_post_failed_submission(no_orchestra_testing_config, minimal_config):
 
 @pytest.mark.parametrize(
     ("init_cmds", "query", "expected", "status"),
-    [
-        (  # query without params
-            [f"INSERT INTO jobs (token) VALUES ('{util.DemoData.token1}')"],
-            "",
-            [util.DemoData.token1],
-            200,
-        ),
-        (  # query for job config id empty
-            [
-                f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
-            ],
-            f"?id={uuid4()}",
-            [],
-            200,
-        ),
-        (  # query for job config id non-empty
-            [
-                f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
-            ],
-            f"?id={util.DemoData.job_config1}",
-            [util.DemoData.token1],
-            200,
-        ),
-        (  # sql injection via id
-            [
-                f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
-            ],
-            f"?id={util.DemoData.job_config1}'",
-            [],
-            422,
-        ),
-        (  # query for status empty
-            [
-                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"
-            ],
-            "?status=queued",
-            [],
-            200,
-        ),
-        (  # query for status non-empty
-            [
-                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"
-            ],
-            "?status=running",
-            [util.DemoData.token1],
-            200,
-        ),
-        (  # query for status non-empty (multiple)
-            [
-                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"
-            ],
-            "?status=queued,running",
-            [util.DemoData.token1],
-            200,
-        ),
-        (  # query for status non-empty (multiple)
-            [
-                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'queued')",
-                "INSERT INTO jobs (token, status) VALUES ('a', 'running')",
-            ],
-            "?status=queued,running",
-            [util.DemoData.token1, "a"],
-            200,
-        ),
-        (  # sql injection via status (ignored)
-            [
-                f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'queued')",
-            ],
-            "?status=queued'",
-            [],
-            422,
-        ),
-        (  # query with from empty
-            [
-                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",
-            ],
-            "?from=2026",
-            [],
-            200,
-        ),
-        (  # query with from non-empty
-            [
-                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",
-            ],
-            "?from=2025",
-            [util.DemoData.token1],
-            200,
-        ),
-        (  # sql injection via from (caught by handler)
-            [
-                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",
-            ],
-            "?from=2025'",
-            [],
-            422,
-        ),
-        (  # query with to empty
-            [
-                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",
-            ],
-            "?to=2026",
-            [],
-            200,
-        ),
-        (  # query with to non-empty
-            [
-                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",
-            ],
-            "?to=2027",
-            [util.DemoData.token1],
-            200,
-        ),
-        (  # sql injection via to (caught by handler)
-            [
-                f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",
-            ],
-            "?to=2027'",
-            [],
-            422,
-        ),
-        (  # query by success empty
-            [
-                f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",
-            ],
-            "?success=false",
-            [],
-            200,
-        ),
-        (  # query by success non-empty
-            [
-                f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",
-            ],
-            "?success=true",
-            [util.DemoData.token1],
-            200,
-        ),
-        (  # sql injection via success (caught by handler)
-            [
-                f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",
-            ],
-            "?success=true'",
-            [],
-            422,
-        ),
-    ],
+    (
+        pytest_args := [
+            (  # query without params
+                [
+                    f"INSERT INTO jobs (token) VALUES ('{util.DemoData.token1}')"
+                ],
+                "",
+                [util.DemoData.token1],
+                200,
+            ),
+            (  # query for job config id empty
+                [
+                    f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
+                ],
+                f"?id={uuid4()}",
+                [],
+                200,
+            ),
+            (  # query for job config id non-empty
+                [
+                    f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
+                ],
+                f"?id={util.DemoData.job_config1}",
+                [util.DemoData.token1],
+                200,
+            ),
+            (  # sql injection via id
+                [
+                    f"INSERT INTO jobs (token, job_config_id) VALUES ('{util.DemoData.token1}', '{util.DemoData.job_config1}')"
+                ],
+                f"?id={util.DemoData.job_config1}'",
+                [],
+                422,
+            ),
+            (  # query for status empty
+                [
+                    f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"
+                ],
+                "?status=queued",
+                [],
+                200,
+            ),
+            (  # query for status non-empty
+                [
+                    f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"
+                ],
+                "?status=running",
+                [util.DemoData.token1],
+                200,
+            ),
+            (  # query for status non-empty (multiple)
+                [
+                    f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'running')"
+                ],
+                "?status=queued,running",
+                [util.DemoData.token1],
+                200,
+            ),
+            (  # query for status non-empty (multiple)
+                [
+                    f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'queued')",
+                    "INSERT INTO jobs (token, status) VALUES ('a', 'running')",
+                ],
+                "?status=queued,running",
+                [util.DemoData.token1, "a"],
+                200,
+            ),
+            (  # sql injection via status (ignored)
+                [
+                    f"INSERT INTO jobs (token, status) VALUES ('{util.DemoData.token1}', 'queued')",
+                ],
+                "?status=queued'",
+                [],
+                422,
+            ),
+            (  # query with from empty
+                [
+                    f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",
+                ],
+                "?from=2026",
+                [],
+                200,
+            ),
+            (  # query with from non-empty
+                [
+                    f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",
+                ],
+                "?from=2025",
+                [util.DemoData.token1],
+                200,
+            ),
+            (  # sql injection via from (caught by handler)
+                [
+                    f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2025')",
+                ],
+                "?from=2025'",
+                [],
+                422,
+            ),
+            (  # query with to empty
+                [
+                    f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",
+                ],
+                "?to=2026",
+                [],
+                200,
+            ),
+            (  # query with to non-empty
+                [
+                    f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",
+                ],
+                "?to=2027",
+                [util.DemoData.token1],
+                200,
+            ),
+            (  # sql injection via to (caught by handler)
+                [
+                    f"INSERT INTO jobs (token, datetime_started) VALUES ('{util.DemoData.token1}', '2027')",
+                ],
+                "?to=2027'",
+                [],
+                422,
+            ),
+            (  # query by success empty
+                [
+                    f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",
+                ],
+                "?success=false",
+                [],
+                200,
+            ),
+            (  # query by success non-empty
+                [
+                    f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",
+                ],
+                "?success=true",
+                [util.DemoData.token1],
+                200,
+            ),
+            (  # sql injection via success (caught by handler)
+                [
+                    f"INSERT INTO jobs (token, success) VALUES ('{util.DemoData.token1}', true)",
+                ],
+                "?success=true'",
+                [],
+                422,
+            ),
+        ]
+    ),
+    ids=[f"stage {i+1}" for i in range(len(pytest_args))],
 )
 def test_options(
     no_orchestra_testing_config, init_cmds, query, expected, status

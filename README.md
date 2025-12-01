@@ -101,9 +101,11 @@ The following variables can be used to configure that procedure
   The randomized password is printed to stdout after data has been generated (see also `DB_DEMO_ADMIN_PW`).
 * `DB_GENERATE_DEMO_USERS` [DEFAULT 1]: whether additional demo users are created at startup (only applies if `DB_GENERATE_DEMO` is set)
 
-  This includes three regular users.
-  User 'einstein' with password 'relativity', user 'curie' with password 'radioactivity', and user 'feynman' with password 'superfluidity'.
+  This includes three regular users: 'einstein', 'curie', and 'feynman'.
 * `DB_DEMO_ADMIN_PW` [DEFAULT null] if set, the generated administrator-account gets assigned this password instead of a random one
+* `DB_DEMO_EINSTEIN_PW` [DEFAULT "relativity"] the password for the 'einstein'-user
+* `DB_DEMO_CURIE_PW` [DEFAULT "radioactivity"] the password for the 'curie'-user
+* `DB_DEMO_FEYNMAN_PW` [DEFAULT "superfluidity"] the password for the 'feynman'-user
 * `DB_STRICT_SCHEMA_VERSION` [DEFAULT 0] whether to enforce matching database schema version with respect to currently installed `dcm-database`
 
 ### Users

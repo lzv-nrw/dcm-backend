@@ -139,8 +139,11 @@ class DemoData:
     user0 = str(uuid3(uuid_namespace, name="user0"))
     generate_demo_users = True
     user1 = str(uuid3(uuid_namespace, name="user1"))
+    user1_password = None
     user2 = str(uuid3(uuid_namespace, name="user2"))
+    user2_password = None
     user3 = str(uuid3(uuid_namespace, name="user3"))
+    user3_password = None
     workspace1 = str(uuid3(uuid_namespace, name="workspace1"))
     workspace2 = str(uuid3(uuid_namespace, name="workspace2"))
     template1 = str(uuid3(uuid_namespace, name="template1"))
@@ -246,7 +249,7 @@ def create_demo_users(db: SQLAdapter, user_create: Callable):
                     user_created=DemoData.user0,
                     datetime_created=now().isoformat(),
                 ),
-                password="relativity",
+                password=DemoData.user1_password,
             ),
             user_create(
                 config=UserConfig(
@@ -259,7 +262,7 @@ def create_demo_users(db: SQLAdapter, user_create: Callable):
                     user_created=DemoData.user0,
                     datetime_created=now().isoformat(),
                 ),
-                password="radioactivity",
+                password=DemoData.user2_password,
             ),
             user_create(
                 config=UserConfig(
@@ -272,7 +275,7 @@ def create_demo_users(db: SQLAdapter, user_create: Callable):
                     user_created=DemoData.user0,
                     datetime_created=now().isoformat(),
                 ),
-                password="superfluidity",
+                password=DemoData.user3_password,
             ),
         ]
         if DemoData.generate_demo_users

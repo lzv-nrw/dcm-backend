@@ -1,5 +1,11 @@
 # Changelog
 
+## [6.1.1] - 2025-12-01
+
+### Added
+
+- added configurability for secrets of demo users
+
 ## [6.1.0] - 2025-11-06
 
 ### Changed

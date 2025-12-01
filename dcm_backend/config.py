@@ -61,6 +61,9 @@ class AppConfig(OrchestratedAppConfig, FSConfig, DBConfig):
         int(os.environ.get("DB_GENERATE_DEMO_USERS") or 1)
     ) == 1
     DB_DEMO_ADMIN_PW = os.environ.get("DB_DEMO_ADMIN_PW")
+    DB_DEMO_EINSTEIN_PW = os.environ.get("DB_DEMO_EINSTEIN_PW", "relativity")
+    DB_DEMO_CURIE_PW = os.environ.get("DB_DEMO_CURIE_PW", "radioactivity")
+    DB_DEMO_FEYNMAN_PW = os.environ.get("DB_DEMO_FEYNMAN_PW", "superfluidity")
 
     # ------ USERS ------
     REQUIRE_USER_ACTIVATION = (
