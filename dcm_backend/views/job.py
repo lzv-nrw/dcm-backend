@@ -4,7 +4,7 @@ Job View-class definition
 
 from typing import Optional
 import sys
-from uuid import UUID
+from uuid import UUID, uuid4
 import re
 
 from flask import Blueprint, jsonify, Response
@@ -87,6 +87,13 @@ class JobView(View):
                             or "templateId" in keys
                             else []
                         )
+                        # collection_id is potentially needed to fetch
+                        # collection-info
+                        + (
+                            ["collection_id"]
+                            if "collection" in keys
+                            else []
+                        )
                         # others can be iterated
                         + [
                             col
@@ -135,6 +142,32 @@ class JobView(View):
                         ["id", "workspace_id"],
                     ).eval()["workspace_id"]
 
+            if (keys is None or "collection" in keys) and query.get(
+                "collection_id"
+            ) is not None:
+                info.collection = self.db.get_row(
+                    "job_collections",
+                    query["collection_id"],
+                    cols=["completed"],
+                ).eval()
+                if info.collection["completed"] is None:
+                    info.collection["completed"] = False
+                info.collection["tokens"] = list(
+                    map(
+                        lambda job: job[0],
+                        self.db.custom_cmd(
+                            # pylint: disable=consider-using-f-string
+                            """
+                            SELECT token FROM jobs
+                            WHERE collection_id={}
+                            ORDER BY datetime_triggered ASC
+                            """.format(
+                                self.db.decode(query["collection_id"], "uuid")
+                            ),
+                            clear_schema_cache=False,
+                        ).eval(),
+                    )
+                )
             return (
                 jsonify(
                     {
@@ -183,14 +216,15 @@ class JobView(View):
                 {
                     "process": {
                         "id": id_,
-                        "testMode": False,
                         "resume": True,
+                        "testMode": False,
                     },
                     "context": {
                         "userTriggered": user_triggered,
                         "datetimeTriggered": util.now().isoformat(),
                         "triggerType": TriggerType.MANUAL.value,
-                        "artifactsTTL": self.config.CLEANUP_ARTIFACT_TTL
+                        "artifactsTTL": self.config.CLEANUP_ARTIFACT_TTL,
+                        "notifyBackend": True,
                     }
                     | ({} if token is None else {"token": token})
                 },
@@ -253,27 +287,32 @@ class JobView(View):
         )
         def post_test_job(config: JobConfig):
             """Run test-job for given `config`."""
-            return Response(
-                "Currently not supported", mimetype="text/plain", status=500
-            )
-            # the job-processor does not accept the entire job configuration
-            # currently..
-            # pylint: disable=unreachable
-
             # submit
             token = self.adapter.submit(
                 None,
                 {
                     "process": {
-                        "config": config.json,
-                        "testMode": True,
                         "resume": False,
+                        "testConfig": {
+                            "templateId": config.template_id,
+                            "dataSelection": (
+                                None
+                                if config.data_selection is None
+                                else config.data_selection.json
+                            ),
+                            "dataProcessing": (
+                                None
+                                if config.data_processing is None
+                                else config.data_processing.json
+                            ),
+                        },
+                        "testMode": True,
                     },
                     "context": {
                         "datetimeTriggered": util.now().isoformat(),
                         "triggerType": TriggerType.TEST.value,
-                        "artifactsTTL": self.config.CLEANUP_ARTIFACT_TTL
-                    }
+                        "artifactsTTL": self.config.CLEANUP_ARTIFACT_TTL,
+                    },
                 },
                 info := services.APIResult(),
             )
@@ -616,6 +655,7 @@ class JobView(View):
                 ("external_id", "externalId"),
                 ("archive_id", "archiveId"),
                 ("latest_record_id", "latestRecordId"),
+                ("latest_record_baginfo_metadata", "bagInfoMetadata"),
             ]
             ies_query = self.config.db.custom_cmd(
                 f"""
@@ -636,7 +676,10 @@ class JobView(View):
             for ie in ies_query:
                 ies[ie[0]] = {}
                 for i, key in enumerate(map(lambda c: c[1], cols)):
-                    ies[ie[0]][key] = ie[i]
+                    if key == "bagInfoMetadata":
+                        ies[ie[0]][key] = self.config.db.encode(ie[i], 'jsonb')
+                    else:
+                        ies[ie[0]][key] = ie[i]
 
             # iterate to collect all records
             for ie in ies.values():
@@ -710,6 +753,7 @@ class JobView(View):
                 ("external_id", "externalId"),
                 ("archive_id", "archiveId"),
                 ("latest_record_id", "latestRecordId"),
+                ("latest_record_baginfo_metadata", "bagInfoMetadata"),
             ]
             ie_query = self.config.db.custom_cmd(
                 f"""
@@ -728,7 +772,10 @@ class JobView(View):
             # parse results
             ie = {}
             for i, key in enumerate(map(lambda c: c[1], cols)):
-                ie[key] = ie_query[0][i]
+                if key == "bagInfoMetadata":
+                    ie[key] = self.config.db.encode(ie_query[0][i], 'jsonb')
+                else:
+                    ie[key] = ie_query[0][i]
 
             # iterate to collect all records
             records_query = self.config.db.get_rows(
@@ -896,6 +943,296 @@ class JobView(View):
                 status=200,
             )
 
+    def _post_job_completion_callback(self, bp: Blueprint):
+
+        @bp.route(
+            "/job/completion",
+            methods=["POST"],
+            provide_automatic_options=False,
+        )
+        @flask_handler(  # unknown query
+            handler=services.no_args_handler,
+            json=flask_args,
+        )
+        @flask_handler(
+            handler=handlers.post_job_completion_handler,
+            json=flask_json,
+        )
+        def completion_callback(
+            token: str,
+            report: dict,
+            job_config_id: Optional[str] = None,
+        ):
+            print(
+                f"Received completion-callback for token '{token}' and job "
+                + f"configuration '{job_config_id}'.",
+                file=sys.stderr,
+            )
+
+            # check if schedule should be disabled
+            if (
+                job_config_id is not None
+                and report.get("args", {})
+                .get("context", {})
+                .get("triggerType")
+                == TriggerType.SCHEDULED.value
+            ):
+                stop_schedule = False
+
+                records = report.get("data", {}).get("records", {})
+                if len(records) == 0:
+                    print(f"{token}: No records.", file=sys.stderr)
+                else:
+                    for record_id, record in records.items():
+                        if record["status"] == "ip-val-error":
+                            stop_schedule = True
+                            print(
+                                f"{token}: Encountered IP-validation error in "
+                                + f"record '{record_id}'. Will stop schedule "
+                                + f"for job configuration '{job_config_id}'.",
+                                file=sys.stderr,
+                            )
+                            break
+
+                if stop_schedule:
+                    jc_query = self.db.get_row(
+                        "job_configs", job_config_id
+                    ).eval("loading job configuration")
+                    if jc_query is None:
+                        print(
+                            f"{token}: Unable to read job configuration "
+                            + f"'{job_config_id}' from database.",
+                            file=sys.stderr,
+                        )
+                    else:
+                        jc = JobConfig.from_row(jc_query)
+                        if jc.schedule is not None and jc.schedule.active:
+                            print(
+                                f"{token}: Stopping schedule for job "
+                                + f"configuration '{job_config_id}'.",
+                                file=sys.stderr,
+                            )
+                            jc.schedule.active = False
+                            self.db.update("job_configs", jc.row).eval(
+                                "writing job configuration"
+                            )
+                            self.scheduler.clear_jobs(job_config_id)
+
+            # manage batched execution
+            if job_config_id is not None:
+                collection_id = (
+                    report.get("args", {})
+                    .get("context", {})
+                    .get("collectionId")
+                )
+                if report.get("data", {}).get("finalBatch") is False:
+                    # * check for existing collection
+                    if collection_id is None:
+                        # * finalize existing collections (if needed; this
+                        #   should only occur due to some error)
+                        self.db.custom_cmd(
+                            # pylint: disable=consider-using-f-string
+                            """
+                            UPDATE job_collections
+                            SET completed={}
+                            WHERE job_config_id={}
+                            """.format(
+                                self.db.decode(True, "boolean"),
+                                self.db.decode(job_config_id, "uuid"),
+                            ),
+                            clear_schema_cache=False,
+                        ).eval("finalizing job collections")
+                        # * create new collection and link job
+                        collection_id = self.db.insert(
+                            "job_collections", {"job_config_id": job_config_id}
+                        ).eval("create job collection")
+                        self.db.update(
+                            "jobs",
+                            {"token": token, "collection_id": collection_id},
+                        ).eval("linking job to collection")
+                        print(
+                            f"{token}: Created new collection "
+                            + f"'{collection_id}' for batched job execution.",
+                            file=sys.stderr,
+                        )
+
+                    # * update records to include existing/assigned
+                    #   collection_id
+                    stop_collection = False
+                    stop_reason = ""
+                    if report.get("progress", {}).get(
+                        "status"
+                    ) != "completed" or not report.get("data", {}).get(
+                        "success"
+                    ):
+                        stop_collection = True
+                        stop_reason = (
+                            f"Batch '{token}' did not return successful"
+                        )
+                    for record_id, record in (
+                        report.get("data", {}).get("records", {}).items()
+                    ):
+                        if (
+                            not stop_collection
+                            and record["status"] == "ip-val-error"
+                        ):
+                            stop_collection = True
+                            stop_reason = (
+                                f"IP-validation error for record '{record_id}'"
+                            )
+                        self.db.update(
+                            "records",
+                            {"id": record_id, "collection_id": collection_id},
+                        ).eval("linking record to collection")
+
+                    # * run next batch
+                    if stop_collection:
+                        print(
+                            f"{token}: Stopping batched processing for "
+                            + f"collection '{collection_id}': {stop_reason}",
+                            file=sys.stderr,
+                        )
+                        failed_token = str(uuid4())
+                        self.db.insert(
+                            "jobs",
+                            {
+                                "token": failed_token,
+                                "status": "aborted",
+                                "job_config_id": job_config_id,
+                                "user_triggered": report.get("args", {})
+                                .get("context", {})
+                                .get("userTriggered"),
+                                "datetime_triggered": util.now().isoformat(),
+                                "trigger_type": report.get("args", {})
+                                .get("context", {})
+                                .get("triggerType"),
+                                "success": False,
+                                "collection_id": collection_id,
+                                "datetime_started": util.now(True).isoformat(),
+                                "datetime_ended": util.now(True).isoformat(),
+                                "report": {
+                                    "host": report.get("host", "unknown"),
+                                    "token": {
+                                        "value": failed_token,
+                                        "expires": False,
+                                    },
+                                    "args": report.get("args"),
+                                    "progress": {
+                                        "status": "aborted",
+                                        "verbose": stop_reason,
+                                        "numeric": 0,
+                                    },
+                                    "log": {
+                                        Context.ERROR.name: [
+                                            {
+                                                "datetime": util.now().isoformat(),
+                                                "origin": "Backend",
+                                                "body": (
+                                                    "Aborted batched "
+                                                    + "processing due to "
+                                                    + f"error: {stop_reason}"
+                                                ),
+                                            }
+                                        ]
+                                    },
+                                },
+                            },
+                        ).eval("writing dummy job")
+                        self.db.update(
+                            "job_collections",
+                            {"id": collection_id, "completed": True},
+                        ).eval("finalizing job collection")
+                    else:
+                        print(
+                            f"{token}: Submitting another job in collection "
+                            + f"'{collection_id}'.",
+                            file=sys.stderr,
+                        )
+                        args = report.get("args", {})
+                        if "context" not in args:
+                            args["context"] = {}
+                        args["context"]["collectionId"] = collection_id
+                        args["context"][
+                            "datetime_triggered"
+                        ] = util.now().isoformat()
+                        if "token" in args:
+                            del args["token"]
+                        new_token = self.adapter.submit(
+                            None,
+                            args,
+                            info := services.APIResult(),
+                        )
+                        if new_token is None:
+                            # unknown problem
+                            # -> stop execution + write dummy to database
+                            print(
+                                f"{token}: Failed to submit next batch for "
+                                + f"configuration '{job_config_id}': "
+                                + "; ".join(
+                                    map(
+                                        lambda x: x["body"],
+                                        info.report.get(
+                                            "log", {}
+                                        ).get(
+                                            Context.ERROR.name, []
+                                        )
+                                    )
+                                ),
+                                file=sys.stderr
+                            )
+                            self.db.insert(
+                                "jobs",
+                                {
+                                    "status": "aborted",
+                                    "job_config_id": job_config_id,
+                                    "user_triggered": report.get("args", {})
+                                    .get("context", {})
+                                    .get("userTriggered"),
+                                    "datetime_triggered": util.now().isoformat(),
+                                    "trigger_type": report.get("args", {})
+                                    .get("context", {})
+                                    .get("triggerType"),
+                                    "success": False,
+                                    "collection_id": collection_id,
+                                    "datetime_started": util.now(True).isoformat(),
+                                    "datetime_ended": util.now(True).isoformat(),
+                                    "report": info.report,
+                                },
+                            ).eval("writing dummy job")
+                            self.db.update(
+                                "job_collections",
+                                {"id": collection_id, "completed": True},
+                            ).eval("finalizing job collection")
+                        else:
+                            print(
+                                f"{token}: New job with token "
+                                + f"'{new_token.value}' started in collection "
+                                + f"'{collection_id}'.",
+                                file=sys.stderr,
+                            )
+                            self.db.update(
+                                "job_configs",
+                                {
+                                    "id": job_config_id,
+                                    "latest_exec": new_token.value,
+                                },
+                            ).eval("update latest-execution")
+                else:
+                    # * flag collection as completed
+                    if collection_id is not None:
+                        self.db.update(
+                            "job_collections",
+                            {"id": collection_id, "completed": True},
+                        ).eval("finalizing job collection")
+
+            print(f"{token}: Done.", file=sys.stderr)
+
+            return Response(
+                "OK",
+                mimetype="text/plain",
+                status=200,
+            )
+
     def configure_bp(self, bp: Blueprint, *args, **kwargs) -> None:
         self._get_info(bp)
         self._post_job(bp)
@@ -905,3 +1242,4 @@ class JobView(View):
         self._get_ies(bp)
         self._get_ie(bp)
         self._post_ie_plan(bp)
+        self._post_job_completion_callback(bp)

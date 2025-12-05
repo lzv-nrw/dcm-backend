@@ -22,4 +22,4 @@ def scheduling_loader(scheduler) -> ExtensionLoaderResult:
     add_signal_handler(signal.SIGINT, _exit)
     add_signal_handler(signal.SIGTERM, _exit)
 
-    return ExtensionLoaderResult().toggle()
+    return ExtensionLoaderResult(stop=_exit).toggle()

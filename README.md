@@ -89,7 +89,7 @@ Once a new object is detected, it is assigned an expiration-datetime (stored in 
 If an object exceeds this expiration-datetime, it is deleted during the next scheduled run of the cleanup-routine.
 The following variables can be used to configure that procedure
 * `CLEANUP_DISABLED` [DEFAULT 0]: whether to disable the automated cleanup
-* `CLEANUP_TARGETS` [DEFAULT '["ie", "ip", "pip", "sip"]']: targeted directories with automated cleanup as a JSON-array of strings; relative to shared file storage
+* `CLEANUP_TARGETS` [DEFAULT '["ie", "ip", "pip", "sip", "bundles"]']: targeted directories with automated cleanup as a JSON-array of strings; relative to shared file storage
 * `CLEANUP_INTERVAL` [DEFAULT 3600]: interval of the cleanup-routine in seconds
 * `CLEANUP_ARTIFACT_TTL` [DEFAULT 604800 (7 days)]: duration until an artifact expires (after detection) in seconds
 
@@ -98,14 +98,14 @@ The following variables can be used to configure that procedure
 * `DB_GENERATE_DEMO` [DEFAULT 0]: whether database-tables and related configuration should be filled with demo-data at startup
 
   This includes an administrator account.
-  The randomized password is printed to stdout after data has been generated (see also `DB_DEMO_ADMIN_PW`).
+  The randomized passwords of the administrator and any further demo accounts (see `DB_GENERATE_DEMO_USERS`) are printed to stdout after data has been generated (see also `DB_DEMO_ADMIN_PW`, etc.).
 * `DB_GENERATE_DEMO_USERS` [DEFAULT 1]: whether additional demo users are created at startup (only applies if `DB_GENERATE_DEMO` is set)
 
   This includes three regular users: 'einstein', 'curie', and 'feynman'.
 * `DB_DEMO_ADMIN_PW` [DEFAULT null] if set, the generated administrator-account gets assigned this password instead of a random one
-* `DB_DEMO_EINSTEIN_PW` [DEFAULT "relativity"] the password for the 'einstein'-user
-* `DB_DEMO_CURIE_PW` [DEFAULT "radioactivity"] the password for the 'curie'-user
-* `DB_DEMO_FEYNMAN_PW` [DEFAULT "superfluidity"] the password for the 'feynman'-user
+* `DB_DEMO_EINSTEIN_PW` [DEFAULT null] if set, the generated 'einstein'-account gets assigned this password instead of a random one
+* `DB_DEMO_CURIE_PW` [DEFAULT null] if set, the generated 'curie'-account gets assigned this password instead of a random one
+* `DB_DEMO_FEYNMAN_PW` [DEFAULT null] if set, the generated 'feynman'-account gets assigned this password instead of a random one
 * `DB_STRICT_SCHEMA_VERSION` [DEFAULT 0] whether to enforce matching database schema version with respect to currently installed `dcm-database`
 
 ### Users
@@ -162,7 +162,7 @@ The following variables can be used to configure that procedure
 
 ### Artifact-API
 * `ARTIFACT_COMPRESSION` [DEFAULT 0]: whether to use compression while bundling job-artifacts
-* `ARTIFACT_BUNDLE_DESTINATION` [DEFAULT "bundles"]: output destination for artifact-bundles
+* `ARTIFACT_BUNDLE_DESTINATION` [DEFAULT "bundles"]: output destination for artifact-bundles; if set, it is advised to add its value to `CLEANUP_TARGETS`
 * `ARTIFACT_FILE_MAX_SIZE` [DEFAULT 0]: maximum allowed size of individual file (before compression) in B; a value of zero corresponds to no limit
 * `ARTIFACT_BUNDLE_MAX_SIZE` [DEFAULT 0]: maximum allowed size of bundle (before compression) in B; a value of zero corresponds to no limit
 * `ARTIFACT_SOURCES` [DEFAULT '["ie", "ip", "pip", "sip"]']: accepted source-directories for bundle-targets as a JSON-array of strings; relative to shared file storage (a target in a bundle-request needs to be located inside one of these source directories to be valid)

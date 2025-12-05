@@ -255,6 +255,37 @@ def test_scheduler_schedule():
     s.clear(True)
 
 
+def test_scheduler_schedule_again():
+    """
+    Test behavior of `Scheduler.schedule` for different `Schedules`.
+    """
+    s = Scheduler(lambda c: Callback().callback)
+    assert len(s.get_plans()) == 0
+    assert (
+        s.schedule(
+            JobConfig(
+                "test-id",
+                Schedule(True, start=datetime.now() + timedelta(days=1)),
+            ),
+            None,
+        )
+        is not None
+    )
+    assert len(s.get_plans()) == 1
+    assert (
+        s.schedule(
+            JobConfig(
+                "test-id",
+                Schedule(True, start=datetime.now() + timedelta(days=1)),
+            ),
+            None,
+        )
+        is not None
+    )
+    assert len(s.get_plans()) == 2
+    s.clear(True)
+
+
 def test_scheduler_schedule_wo_repeat():
     """Test basic use of `schedule` without repeat."""
     on_timeout = Callback()

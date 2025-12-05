@@ -23,6 +23,7 @@ test_job_info_json = get_model_serialization_test(
                 "report": {"some": "report"},
                 "template_id": "some-id",
                 "workspace_id": "some-id",
+                "collection": {},
             },
         ),
     ),

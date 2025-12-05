@@ -83,8 +83,9 @@ def app_factory(
                                 else TriggerType.SCHEDULED
                             ).value
                         ),
-                        "artifactsTTL": config.CLEANUP_ARTIFACT_TTL
-                    }
+                        "artifactsTTL": config.CLEANUP_ARTIFACT_TTL,
+                        "notifyBackend": True,
+                    },
                 },
                 result,
             )
@@ -215,7 +216,8 @@ def app_factory(
     app.register_blueprint(ReportView(config).get_blueprint(), url_prefix="/")
     app.register_blueprint(view_artifact.get_blueprint(), url_prefix="/")
     app.register_blueprint(
-        ReportView(config).get_blueprint(name="artifact-reports"), url_prefix="/artifact"
+        ReportView(config).get_blueprint(name="artifact-reports"),
+        url_prefix="/artifact",
     )
     app.register_blueprint(configuration_view.get_blueprint(), url_prefix="/")
     app.register_blueprint(job_view.get_blueprint(), url_prefix="/")

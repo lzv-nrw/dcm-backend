@@ -107,6 +107,37 @@ class ConfigurationView(View):
                 ).eval("fetching number of IEs")[0][0],
                 "integer",
             )
+            # * fetch number of IEs with issue/error
+            config.issues = self.config.db.encode(
+                self.config.db.custom_cmd(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM ies_with_latest_record
+                    WHERE job_config_id = {self.config.db.decode(id_, 'text')}
+                    AND latest_record_status LIKE '%error%'
+                    AND latest_record_ignored is not {self.config.db.decode(True, 'boolean')};
+                    """,
+                    clear_schema_cache=False,
+                ).eval("fetching number of IEs with issue")[0][0],
+                "integer",
+            )
+            # * fetch number of IEs with issue/error from the latest execution
+            if query["latest_exec"] is not None:
+                config.issues_latest_exec = self.config.db.encode(
+                    self.config.db.custom_cmd(
+                        f"""
+                        SELECT COUNT(*)
+                        FROM records
+                        WHERE job_token = {self.config.db.decode(query["latest_exec"], 'text')}
+                        AND status LIKE '%error%'
+                        AND ignored is not {self.config.db.decode(True, 'boolean')};
+                        """,
+                        clear_schema_cache=False,
+                    ).eval("fetching number of IEs with issue")[0][0],
+                    "integer",
+                )
+            else:
+                config.issues_latest_exec = 0
             return jsonify(config.json), 200
 
     def _post_job_config(self, bp: Blueprint):
@@ -182,6 +213,7 @@ class ConfigurationView(View):
             # re-schedule if not draft
             if config.status == "ok":
                 # TODO: pass previous execution
+                self.scheduler.clear_jobs(config.id_)
                 self.scheduler.schedule(config)
             return Response("OK", mimetype="text/plain", status=200)
 

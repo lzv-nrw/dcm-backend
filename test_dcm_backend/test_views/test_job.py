@@ -2,9 +2,11 @@
 
 from uuid import uuid3, uuid4
 import json
+from datetime import timedelta
 
 from flask import jsonify, request, Response
 import pytest
+from dcm_common import LoggingContext
 from dcm_common.util import now
 
 from dcm_backend import app_factory, util
@@ -17,6 +19,7 @@ def _minimal_config():
         "id": "dab3e1bf-f655-4e57-938d-d6953612552b",
         "templateId": util.DemoData.template1,
         "status": "ok",
+        "name": "test-job",
         "schedule": {
             "active": True,
             "start": now().isoformat(),
@@ -67,6 +70,10 @@ def test_get_keys(no_orchestra_testing_config):
     """
     config = no_orchestra_testing_config()
     client = app_factory(config, block=True).test_client()
+    collection_id = config.db.insert(
+        "job_collections",
+        {"job_config_id": util.DemoData.job_config1, "completed": True},
+    ).eval()
     config.db.insert(
         "jobs",
         {
@@ -80,6 +87,19 @@ def test_get_keys(no_orchestra_testing_config):
             "datetime_started": now().isoformat(),
             "datetime_ended": now().isoformat(),
             "report": {},
+            "collection_id": collection_id,
+        },
+    )
+    config.db.insert(
+        "jobs",
+        {
+            "token": str(uuid4()),
+            "job_config_id": util.DemoData.job_config1,
+            "datetime_triggered": (now() + timedelta(days=-1)).isoformat(),
+            "trigger_type": TriggerType.MANUAL.value,
+            "status": "ok",
+            "report": {},
+            "collection_id": collection_id,
         },
     )
 
@@ -95,13 +115,23 @@ def test_get_keys(no_orchestra_testing_config):
         "datetime_started": "datetimeStarted",
         "datetime_ended": "datetimeEnded",
     }
+    skip = ["collection_id"]
     for col, value in db_query.items():
+        if col in skip:
+            continue
         key = key_map.get(col, col)
         if key in job_info:
             assert job_info[key] == value
         else:
             assert value is None
-    assert all(key in job_info for key in ["templateId", "workspaceId"])
+    assert all(
+        key in job_info for key in ["templateId", "workspaceId", "collection"]
+    )
+
+    # check collection
+    assert job_info["collection"]["completed"]
+    assert len(job_info["collection"]["tokens"]) == 2
+    assert job_info["collection"]["tokens"][1] == util.DemoData.token1
 
     # test individual keys
     for key in [
@@ -115,6 +145,7 @@ def test_get_keys(no_orchestra_testing_config):
         "report",
         "templateId",
         "workspaceId",
+        "collection",
     ]:
         partial_job_info = client.get(
             f"/job?token={util.DemoData.token1}&keys={key}"
@@ -215,8 +246,6 @@ def test_post(
     )
 
 
-# FIXME: enable after test-jobs are fixed
-@pytest.mark.skip(reason="currently not supported")
 def test_post_test(
     no_orchestra_testing_config,
     minimal_info,
@@ -247,7 +276,7 @@ def test_post_test(
     config = no_orchestra_testing_config()
     client = app_factory(config, block=True).test_client()
     response = client.post(
-        "/job-test", json=minimal_config | {"name": "test-job"}
+        "/job-test", json=minimal_config
     )
 
     assert response.status_code == 201
@@ -503,6 +532,7 @@ class ExtDemoData(util.DemoData):
     record0 = str(uuid3(util.uuid_namespace, name="record0"))
     record1 = str(uuid3(util.uuid_namespace, name="record1"))
     record2 = str(uuid3(util.uuid_namespace, name="record2"))
+    token2 = str(uuid3(util.uuid_namespace, name="token2"))
 
 
 def test_get_ies(no_orchestra_testing_config):
@@ -520,7 +550,7 @@ def test_get_ies(no_orchestra_testing_config):
     for cmd in [
         f"INSERT INTO ies VALUES ('{ExtDemoData.ie0}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-0', 'archive-0')",
         f"INSERT INTO ies VALUES ('{ExtDemoData.ie1}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-1', 'archive-0')",
-        f"INSERT INTO records (id, job_config_id, job_token, ie_id, status) VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'complete')",
+        f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, baginfo_metadata) VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'complete', '{{\"x\": [\"y\"]}}')",
         f"INSERT INTO job_configs (id, template_id) VALUES ('{ExtDemoData.job_config2}', '{ExtDemoData.template2}')",
         f"INSERT INTO ies VALUES ('{ExtDemoData.ie2}', '{ExtDemoData.job_config2}', 'a', 'b', 'ext-a', 'archive-0')",
         f"INSERT INTO job_configs (id, template_id) VALUES ('{ExtDemoData.job_config3}', '{ExtDemoData.template3}')",
@@ -540,6 +570,7 @@ def test_get_ies(no_orchestra_testing_config):
                 "originSystemId": "b",
                 "externalId": "ext-0",
                 "archiveId": "archive-0",
+                "bagInfoMetadata": {"x": ["y"]},
                 "latestRecordId": ExtDemoData.record0,
                 "records": {
                     ExtDemoData.record0: {
@@ -557,6 +588,7 @@ def test_get_ies(no_orchestra_testing_config):
                 "externalId": "ext-1",
                 "archiveId": "archive-0",
                 "latestRecordId": None,
+                "bagInfoMetadata": None,
             },
         ],
     }
@@ -574,6 +606,7 @@ def test_get_ies(no_orchestra_testing_config):
                 "externalId": "ext-a",
                 "archiveId": "archive-0",
                 "latestRecordId": None,
+                "bagInfoMetadata": None,
             }
         ],
     }
@@ -838,9 +871,16 @@ def test_get_ie(no_orchestra_testing_config):
             "trigger_type": TriggerType.MANUAL.value,
         },
     )
+    config.db.insert(
+        "jobs",
+        {
+            "token": ExtDemoData.token2,
+        },
+    )
     for cmd in [
         f"INSERT INTO ies VALUES ('{ExtDemoData.ie0}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-0', 'archive-0')",
-        f"INSERT INTO records (id, job_config_id, job_token, ie_id, status) VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'complete')",
+        f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, 'baginfo_metadata', 'datetime_changed') VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'complete', '{{\"x\": [\"y0\"]}}', '1111')",
+        f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, 'baginfo_metadata', 'datetime_changed') VALUES ('{ExtDemoData.record1}', '{ExtDemoData.job_config1}', '{ExtDemoData.token2}', '{ExtDemoData.ie0}', 'complete', '{{\"x\": [\"y1\"]}}', '9999')",
     ]:
         config.db.custom_cmd(cmd, clear_schema_cache=False).eval()
 
@@ -852,12 +892,20 @@ def test_get_ie(no_orchestra_testing_config):
         "originSystemId": "b",
         "externalId": "ext-0",
         "archiveId": "archive-0",
-        "latestRecordId": ExtDemoData.record0,
+        "bagInfoMetadata": {"x": ["y1"]},
+        "latestRecordId": ExtDemoData.record1,
         "records": {
             ExtDemoData.record0: {
                 "id": ExtDemoData.record0,
                 "jobToken": ExtDemoData.token1,
                 "status": "complete",
+                "datetimeChanged": "1111",
+            },
+            ExtDemoData.record1: {
+                "id": ExtDemoData.record1,
+                "jobToken": ExtDemoData.token2,
+                "status": "complete",
+                "datetimeChanged": "9999",
             }
         },
     }
@@ -1044,3 +1092,449 @@ def test_post_ie_plan(no_orchestra_testing_config):
     )
     print(response.data)
     assert response.status_code == 400
+
+
+def test_post_job_completion_schedule_stop(
+    no_orchestra_testing_config, minimal_config
+):
+    """Test endpoint `POST-/job/completion` of job-API."""
+    config = no_orchestra_testing_config()
+    config.SCHEDULING_AT_STARTUP = False
+    app = app_factory(config, block=True)
+    client = app.test_client()
+
+    # create scheduled job configuration
+    minimal_config["schedule"]["start"] = (
+        now() + timedelta(days=1)
+    ).isoformat()
+    job_id = client.post(
+        "/job/configure", json=minimal_config
+    ).json["id"]
+    app.extensions["scheduling"].stop()
+
+    def check(exp: bool):
+        assert (
+            config.db.get_row("job_configs", job_id, cols=["schedule"])
+            .eval()
+            .get("schedule", {})
+            .get("active")
+        ) is exp
+
+    # run callback
+    # * empty report
+    assert client.post(
+        "/job/completion",
+        json={
+            "token": util.DemoData.token1,
+            "jobConfigId": job_id,
+            "report": {},
+        },
+    ).status_code == 200
+    check(True)
+    # * no records
+    assert client.post(
+        "/job/completion",
+        json={
+            "token": util.DemoData.token1,
+            "jobConfigId": job_id,
+            "report": {"data": {"records": []}},
+        },
+    ).status_code == 200
+    check(True)
+    # * everything is fine
+    assert (
+        client.post(
+            "/job/completion",
+            json={
+                "token": util.DemoData.token1,
+                "jobConfigId": job_id,
+                "report": {
+                    "args": {
+                        "context": {"triggerType": TriggerType.SCHEDULED.value}
+                    },
+                    "data": {
+                        "records": {
+                            "a": {"status": "in-process"},
+                            "b": {"status": "process-error"},
+                            "c": {"status": "complete"},
+                        }
+                    },
+                },
+            },
+        ).status_code
+        == 200
+    )
+    check(True)
+    # * unknown job-config id
+    assert (
+        client.post(
+            "/job/completion",
+            json={
+                "token": util.DemoData.token1,
+                "jobConfigId": str(uuid4()),
+                "report": {
+                    "args": {
+                        "context": {"triggerType": TriggerType.SCHEDULED.value}
+                    },
+                    "data": {"records": {"a": {"status": "ip-val-error"}}},
+                },
+            },
+        ).status_code
+        == 200
+    )
+    check(True)
+    # * ip-val-error but manual trigger
+    assert (
+        client.post(
+            "/job/completion",
+            json={
+                "token": util.DemoData.token1,
+                "jobConfigId": job_id,
+                "report": {
+                    "args": {
+                        "context": {"triggerType": TriggerType.MANUAL.value}
+                    },
+                    "data": {"records": {"a": {"status": "ip-val-error"}}},
+                },
+            },
+        ).status_code
+        == 200
+    )
+    check(True)
+    # * ip-val-error and scheduled execution
+    assert (
+        client.post(
+            "/job/completion",
+            json={
+                "token": util.DemoData.token1,
+                "jobConfigId": job_id,
+                "report": {
+                    "args": {
+                        "context": {"triggerType": TriggerType.SCHEDULED.value}
+                    },
+                    "data": {"records": {"a": {"status": "ip-val-error"}}},
+                },
+            },
+        ).status_code
+        == 200
+    )
+    check(False)
+
+
+@pytest.mark.parametrize("final_batch", [True, False])
+def test_post_job_completion_new_collection(
+    no_orchestra_testing_config,
+    minimal_config,
+    file_storage,
+    run_service,
+    final_batch,
+):
+    """Test endpoint `POST-/job/completion` of job-API."""
+    token = str(uuid4())
+    file = str(uuid4())
+    assert not (file_storage / file).exists()
+
+    def _process():
+        (file_storage / file).write_text(
+            json.dumps(request.json), encoding="utf-8"
+        )
+        return jsonify({"value": token, "expires": False}), 201
+
+    run_service(routes=[("/process", _process, ["POST"])], port=8087)
+
+    config = no_orchestra_testing_config()
+    config.SCHEDULING_AT_STARTUP = False
+    app = app_factory(config, block=True)
+    client = app.test_client()
+
+    # create scheduled job configuration
+    job_id = client.post(
+        "/job/configure", json=minimal_config | {"schedule": {"active": False}}
+    ).json["id"]
+    # create report in db
+    config.db.insert(
+        "jobs", {"token": util.DemoData.token1, "job_config_id": job_id}
+    ).eval()
+    # create record in db
+    record_id = str(uuid4())
+    config.db.insert(
+        "records",
+        {
+            "id": record_id,
+            "job_config_id": job_id,
+            "job_token": util.DemoData.token1,
+        },
+    ).eval()
+
+    assert (
+        client.post(
+            "/job/completion",
+            json={
+                "token": util.DemoData.token1,
+                "jobConfigId": job_id,
+                "report": {
+                    "args": {
+                        "process": {"id": job_id},
+                        "context": {"triggerType": TriggerType.MANUAL.value},
+                    },
+                    "progress": {"status": "completed"},
+                    "data": {
+                        "success": True,
+                        "finalBatch": final_batch,
+                        "records": {
+                            record_id: {
+                                "id": record_id,
+                                "started": True,
+                                "completed": True,
+                                "status": "complete",
+                                "stages": {}
+                            }
+                        }
+                    },
+                },
+            },
+        ).status_code
+        == 200
+    )
+
+    # collection is created
+    collections = config.db.get_rows("job_collections", cols=["id"]).eval()
+    assert len(collections) == (0 if final_batch else 1)
+
+    if not final_batch:
+        # job has been linked to that collection
+        assert (
+            config.db.get_row(
+                "jobs", util.DemoData.token1, cols=["collection_id"]
+            ).eval()
+        )["collection_id"] == collections[0]["id"]
+
+        assert (
+            config.db.get_row(
+                "records", record_id, cols=["collection_id"]
+            ).eval()["collection_id"]
+            == collections[0]["id"]
+        )
+
+    # jp has been called
+    assert (file_storage / file).exists() is not final_batch
+
+
+def test_post_job_completion_existing_collection(
+    no_orchestra_testing_config, minimal_config
+):
+    """Test endpoint `POST-/job/completion` of job-API."""
+
+    config = no_orchestra_testing_config()
+    config.SCHEDULING_AT_STARTUP = False
+    app = app_factory(config, block=True)
+    client = app.test_client()
+
+    # create scheduled job configuration
+    job_id = client.post(
+        "/job/configure", json=minimal_config | {"schedule": {"active": False}}
+    ).json["id"]
+    # create collection and report in db
+    collection_id = config.db.insert(
+        "job_collections", {"completed": False}
+    ).eval()
+    config.db.insert(
+        "jobs",
+        {
+            "token": util.DemoData.token1,
+            "job_config_id": job_id,
+            "collection_id": collection_id,
+        },
+    ).eval()
+
+    assert (
+        client.post(
+            "/job/completion",
+            json={
+                "token": util.DemoData.token1,
+                "jobConfigId": job_id,
+                "report": {
+                    "args": {
+                        "process": {"id": job_id},
+                        "context": {
+                            "triggerType": TriggerType.MANUAL.value,
+                            "collectionId": collection_id,
+                        },
+                    },
+                    "progress": {"status": "completed"},
+                    "data": {"success": True, "finalBatch": True},
+                },
+            },
+        ).status_code
+        == 200
+    )
+
+    # no collection is created
+    assert len(config.db.get_rows("job_collections", cols=["id"]).eval()) == 1
+    # collection is finalized
+    assert config.db.get_row("job_collections", collection_id).eval()[
+        "completed"
+    ]
+
+
+def test_post_job_completion_failed_next_batch(
+    no_orchestra_testing_config, minimal_config
+):
+    """Test endpoint `POST-/job/completion` of job-API."""
+
+    config = no_orchestra_testing_config()
+    config.SCHEDULING_AT_STARTUP = False
+    app = app_factory(config, block=True)
+    client = app.test_client()
+
+    # create scheduled job configuration
+    job_id = client.post(
+        "/job/configure", json=minimal_config | {"schedule": {"active": False}}
+    ).json["id"]
+    # create collection and report in db
+    config.db.insert(
+        "jobs",
+        {
+            "token": util.DemoData.token1,
+            "job_config_id": job_id,
+        },
+    ).eval()
+
+    assert (
+        client.post(
+            "/job/completion",
+            json={
+                "token": util.DemoData.token1,
+                "jobConfigId": job_id,
+                "report": {
+                    "args": {
+                        "process": {"id": job_id},
+                        "context": {"triggerType": TriggerType.MANUAL.value},
+                    },
+                    "progress": {"status": "completed"},
+                    "data": {"succcess": True, "finalBatch": False},
+                },
+            },
+        ).status_code
+        == 200
+    )
+
+    # collection is created
+    collections = config.db.get_rows("job_collections", cols=["id"]).eval()
+    assert len(collections) == 1
+    # collection is finalized
+    assert config.db.get_row("job_collections", collections[0]["id"]).eval()[
+        "completed"
+    ]
+
+    jobs = config.db.get_rows("jobs", cols=["token"]).eval()
+    assert len(jobs) == 2
+    failed_report = config.db.get_row(
+        "jobs",
+        [
+            job["token"]
+            for job in jobs
+            if job["token"] != util.DemoData.token1
+        ][0],
+    ).eval()
+    assert failed_report["status"] == "aborted"
+    assert failed_report["job_config_id"] == job_id
+    assert not failed_report["success"]
+    assert failed_report["datetime_started"] is not None
+    assert failed_report["datetime_ended"] is not None
+    assert failed_report["collection_id"] is not None
+    assert failed_report["report"] is not None
+    assert LoggingContext.ERROR.name in failed_report["report"]["log"]
+    print(failed_report["report"]["log"][LoggingContext.ERROR.name])
+
+
+def test_post_job_completion_stop_collection_on_error(
+    no_orchestra_testing_config, minimal_config
+):
+    """Test endpoint `POST-/job/completion` of job-API."""
+
+    config = no_orchestra_testing_config()
+    config.SCHEDULING_AT_STARTUP = False
+    app = app_factory(config, block=True)
+    client = app.test_client()
+
+    # create scheduled job configuration
+    job_id = client.post(
+        "/job/configure", json=minimal_config | {"schedule": {"active": False}}
+    ).json["id"]
+    # create collection and report in db
+    config.db.insert(
+        "jobs",
+        {
+            "token": util.DemoData.token1,
+            "job_config_id": job_id,
+        },
+    ).eval()
+    # create record in db
+    record_id = str(uuid4())
+    config.db.insert(
+        "records",
+        {
+            "id": record_id,
+            "job_config_id": job_id,
+            "job_token": util.DemoData.token1,
+        },
+    ).eval()
+
+    assert (
+        client.post(
+            "/job/completion",
+            json={
+                "token": util.DemoData.token1,
+                "jobConfigId": job_id,
+                "report": {
+                    "args": {
+                        "process": {"id": job_id},
+                        "context": {"triggerType": TriggerType.MANUAL.value},
+                    },
+                    "progress": {"status": "completed"},
+                    "data": {
+                        "success": True,
+                        "finalBatch": False,
+                        "records": {
+                            record_id: {
+                                "id": record_id,
+                                "started": True,
+                                "completed": True,
+                                "status": "ip-val-error",
+                                "stages": {},
+                            }
+                        },
+                    },
+                },
+            },
+        ).status_code
+        == 200
+    )
+
+    # collection is created
+    collections = config.db.get_rows("job_collections", cols=["id"]).eval()
+    assert len(collections) == 1
+    # collection is finalized
+    assert config.db.get_row("job_collections", collections[0]["id"]).eval()[
+        "completed"
+    ]
+    jobs = config.db.get_rows("jobs", cols=["token"]).eval()
+    assert len(jobs) == 2
+    failed_report = config.db.get_row(
+        "jobs",
+        [
+            job["token"]
+            for job in jobs
+            if job["token"] != util.DemoData.token1
+        ][0],
+    ).eval()
+    assert failed_report["status"] == "aborted"
+    assert failed_report["job_config_id"] == job_id
+    assert not failed_report["success"]
+    assert failed_report["datetime_started"] is not None
+    assert failed_report["datetime_ended"] is not None
+    assert failed_report["collection_id"] is not None
+    assert failed_report["report"] is not None
+    assert LoggingContext.ERROR.name in failed_report["report"]["log"]
+    print(failed_report["report"]["log"][LoggingContext.ERROR.name])

@@ -1,6 +1,6 @@
 """Test-module for configuration-endpoint."""
 
-from uuid import uuid4
+from uuid import uuid3, uuid4
 from time import time, sleep
 from json import dumps
 from datetime import datetime, timedelta
@@ -54,6 +54,20 @@ def _minimal_template_config():
     }
 
 
+class ExtDemoData(util.DemoData):
+    job_config2 = str(uuid3(util.uuid_namespace, name="job_config2"))
+    job_config3 = str(uuid3(util.uuid_namespace, name="job_config3"))
+    ie0 = str(uuid3(util.uuid_namespace, name="ie0"))
+    ie1 = str(uuid3(util.uuid_namespace, name="ie1"))
+    ie2 = str(uuid3(util.uuid_namespace, name="ie2"))
+    ie3 = str(uuid3(util.uuid_namespace, name="ie3"))
+    record0 = str(uuid3(util.uuid_namespace, name="record0"))
+    record1 = str(uuid3(util.uuid_namespace, name="record1"))
+    record2 = str(uuid3(util.uuid_namespace, name="record2"))
+    record3 = str(uuid3(util.uuid_namespace, name="record3"))
+    token2 = str(uuid3(util.uuid_namespace, name="token2"))
+
+
 def test_get_job(no_orchestra_testing_config):
     """Test endpoint `GET-/job/configure` of config-API."""
     config = no_orchestra_testing_config()
@@ -64,7 +78,165 @@ def test_get_job(no_orchestra_testing_config):
     assert response.mimetype == "application/json"
     assert response.json == JobConfig.from_row(
         config.db.get_row("job_configs", util.DemoData.job_config1).eval()
-    ).json | {"IEs": 0, "workspaceId": util.DemoData.workspace1}
+    ).json | {
+        "IEs": 0,
+        "workspaceId": util.DemoData.workspace1,
+        "issues": 0,
+        "issuesLatestExec": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "init_cmds",
+        "query",
+        "expected_ies",
+        "expected_issues",
+        "expected_issues_latest_exec",
+    ),
+    [
+        (  # job_config1: no run
+            [],
+            f"?id={ExtDemoData.job_config1}",
+            0,
+            0,
+            0,
+        ),
+        (  # job_config1: run 1 (no error)
+            [
+                f"INSERT INTO job_configs (id, template_id) VALUES ('{ExtDemoData.job_config2}', '{ExtDemoData.template2}')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie0}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-0', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie1}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-1', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie2}', '{ExtDemoData.job_config2}', 'a', 'b', 'ext-2', 'archive-0')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'complete', '9999')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record1}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie1}', 'complete', '1111')",
+            ],
+            f"?id={ExtDemoData.job_config1}",
+            2,
+            0,
+            0,
+        ),
+        (  # job_config1: run 1 (1 error)
+            [
+                f"UPDATE job_configs SET latest_exec = '{ExtDemoData.token1}' WHERE id =  ('{ExtDemoData.job_config1}')",
+                f"INSERT INTO job_configs (id, template_id) VALUES ('{ExtDemoData.job_config2}', '{ExtDemoData.template2}')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie0}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-0', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie1}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-1', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie2}', '{ExtDemoData.job_config2}', 'a', 'b', 'ext-2', 'archive-0')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'complete', '9999')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record1}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie1}', 'process-error', '1111')",
+            ],
+            f"?id={ExtDemoData.job_config1}",
+            2,
+            1,
+            1,
+        ),
+        (  # job_config1: run 1 (1 error, but ignored)
+            [
+                f"UPDATE job_configs SET latest_exec = '{ExtDemoData.token1}' WHERE id =  ('{ExtDemoData.job_config1}')",
+                f"INSERT INTO job_configs (id, template_id) VALUES ('{ExtDemoData.job_config2}', '{ExtDemoData.template2}')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie0}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-0', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie1}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-1', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie2}', '{ExtDemoData.job_config2}', 'a', 'b', 'ext-2', 'archive-0')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'complete', '9999')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed, ignored) VALUES ('{ExtDemoData.record1}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie1}', 'process-error', '1111', 1)",
+            ],
+            f"?id={ExtDemoData.job_config1}",
+            2,
+            0,
+            0,
+        ),
+        (  # job_config1: run 1 (1 error), run 2 (no error)
+            [
+                f"UPDATE job_configs SET latest_exec = '{ExtDemoData.token2}' WHERE id =  ('{ExtDemoData.job_config1}')",
+                f"INSERT INTO job_configs (id, template_id) VALUES ('{ExtDemoData.job_config2}', '{ExtDemoData.template2}')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie0}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-0', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie1}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-1', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie2}', '{ExtDemoData.job_config2}', 'a', 'b', 'ext-2', 'archive-0')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'complete', '9999')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record1}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie1}', 'process-error', '1111')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record2}', '{ExtDemoData.job_config1}', '{ExtDemoData.token2}', '{ExtDemoData.ie1}', 'complete', '2222')",
+            ],
+            f"?id={ExtDemoData.job_config1}",
+            2,
+            0,
+            0,
+        ),
+        (  # job_config1: run 1 (1 error, but `ignored`), run 2 (1 error)
+            [
+                f"UPDATE job_configs SET latest_exec = '{ExtDemoData.token2}' WHERE id =  ('{ExtDemoData.job_config1}')",
+                f"INSERT INTO job_configs (id, template_id) VALUES ('{ExtDemoData.job_config2}', '{ExtDemoData.template2}')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie0}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-0', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie1}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-1', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie2}', '{ExtDemoData.job_config2}', 'a', 'b', 'ext-2', 'archive-0')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed, ignored) VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'process-error', '9999', 1)",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record1}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie1}', 'process-error', '1111')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed, ignored) VALUES ('{ExtDemoData.record2}', '{ExtDemoData.job_config1}', '{ExtDemoData.token2}', '{ExtDemoData.ie1}', 'process-error', '2222', 0)",
+            ],
+            f"?id={ExtDemoData.job_config1}",
+            2,
+            1,
+            1,
+        ),
+        (  # no associated record
+            [
+                f"INSERT INTO job_configs (id, template_id) VALUES ('{ExtDemoData.job_config2}', '{ExtDemoData.template2}')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie0}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-0', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie1}', '{ExtDemoData.job_config1}', 'a', 'b', 'ext-1', 'archive-0')",
+                f"INSERT INTO ies VALUES ('{ExtDemoData.ie2}', '{ExtDemoData.job_config2}', 'a', 'b', 'ext-2', 'archive-0')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record0}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie0}', 'complete', '9999')",
+                f"INSERT INTO records (id, job_config_id, job_token, ie_id, status, datetime_changed) VALUES ('{ExtDemoData.record1}', '{ExtDemoData.job_config1}', '{ExtDemoData.token1}', '{ExtDemoData.ie1}', 'process-error', '1111')",
+            ],
+            f"?id={ExtDemoData.job_config2}",
+            1,
+            0,
+            0,
+        ),
+    ],
+    ids=[
+        "no-run",
+        "one-run_no-error",
+        "one-run_one-error",
+        "one-run_one-error-ignored",
+        "two-runs_error-fixed",
+        "two-runs_error-ignored",
+        "job_config2",
+    ],
+)
+def test_get_job_ies_errors(
+    no_orchestra_testing_config,
+    init_cmds,
+    query,
+    expected_ies,
+    expected_issues,
+    expected_issues_latest_exec,
+):
+    """
+    Test endpoint `GET-/job/configure` of config-API for number of ies and issues.
+    """
+    config = no_orchestra_testing_config()
+    client = app_factory(config, block=True).test_client()
+
+    config.db.insert(
+        "jobs",
+        {
+            "token": util.DemoData.token1,
+        },
+    )
+    config.db.insert(
+        "jobs",
+        {
+            "token": ExtDemoData.token2,
+        },
+    )
+    for cmd in init_cmds:
+        config.db.custom_cmd(cmd, clear_schema_cache=False).eval()
+
+    response = client.get(f"/job/configure{query}")
+    assert response.status_code == 200
+    assert response.json["IEs"] == expected_ies
+    assert response.json["issues"] == expected_issues
+    assert response.json["issuesLatestExec"] == expected_issues_latest_exec
 
 
 def test_get_job_no_workspace(no_orchestra_testing_config, minimal_job_config):
@@ -87,7 +259,7 @@ def test_get_job_no_workspace(no_orchestra_testing_config, minimal_job_config):
         response.json
         == JobConfig.from_row(
             config.db.get_row("job_configs", job_config_id).eval()
-        ).json | {"IEs": 0}
+        ).json | {"IEs": 0, "issues": 0, "issuesLatestExec": 0}
     )
 
 

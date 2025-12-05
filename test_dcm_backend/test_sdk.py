@@ -22,6 +22,7 @@ def _sdk_testing_config(testing_config, file_storage):
         testing_config.SCHEDULING_AT_STARTUP = True
         testing_config.SQLITE_DB_FILE = file_storage / str(uuid4())
         testing_config.DB_ADAPTER_STARTUP_IMMEDIATELY = True
+        testing_config.DB_DEMO_EINSTEIN_PW = "relativity"
 
     return SDKTestingConfig
 
@@ -295,7 +296,12 @@ def test_job_configure(
     assert config == (
         job_config
         | config_info.to_dict()
-        | {"IEs": 0, "workspaceId": util.DemoData.workspace1}
+        | {
+            "IEs": 0,
+            "workspaceId": util.DemoData.workspace1,
+            "issues": 0,
+            "issuesLatestExec": 0,
+        }
     )
 
     assert sorted(config_sdk.list_job_configs()) == sorted(
@@ -412,12 +418,11 @@ def test_job(
     assert info.token == token["value"]
 
     # run test-job
-    # FIXME: enable after test-jobs are fixed
-    # db.delete("jobs", token["value"])
-    # job_token = job_sdk.run_test_job(minimal_config)
-    # assert any(
-    #     job_token.value in job["token"] for job in db.get_rows("jobs").eval()
-    # )
+    db.delete("jobs", token["value"])
+    job_token = job_sdk.run_test_job(minimal_config)
+    assert any(
+        job_token.value in job["token"] for job in db.get_rows("jobs").eval()
+    )
 
 
 def test_configure_user(

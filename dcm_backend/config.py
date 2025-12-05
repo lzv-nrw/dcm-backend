@@ -28,7 +28,7 @@ class AppConfig(OrchestratedAppConfig, FSConfig, DBConfig):
     # ------ CLEANUP ------
     CLEANUP_DISABLED = int(os.environ.get("CLEANUP_DISABLED", 0)) == 1
     CLEANUP_TARGETS = os.environ.get(
-        "CLEANUP_TARGETS", '["ie", "ip", "pip", "sip"]'
+        "CLEANUP_TARGETS", '["ie", "ip", "pip", "sip", "bundles"]'
     )
     CLEANUP_INTERVAL = float(os.environ.get("CLEANUP_INTERVAL", 3600))
     CLEANUP_ARTIFACT_TTL = int(
@@ -61,9 +61,9 @@ class AppConfig(OrchestratedAppConfig, FSConfig, DBConfig):
         int(os.environ.get("DB_GENERATE_DEMO_USERS") or 1)
     ) == 1
     DB_DEMO_ADMIN_PW = os.environ.get("DB_DEMO_ADMIN_PW")
-    DB_DEMO_EINSTEIN_PW = os.environ.get("DB_DEMO_EINSTEIN_PW", "relativity")
-    DB_DEMO_CURIE_PW = os.environ.get("DB_DEMO_CURIE_PW", "radioactivity")
-    DB_DEMO_FEYNMAN_PW = os.environ.get("DB_DEMO_FEYNMAN_PW", "superfluidity")
+    DB_DEMO_EINSTEIN_PW = os.environ.get("DB_DEMO_EINSTEIN_PW")
+    DB_DEMO_CURIE_PW = os.environ.get("DB_DEMO_CURIE_PW")
+    DB_DEMO_FEYNMAN_PW = os.environ.get("DB_DEMO_FEYNMAN_PW")
 
     # ------ USERS ------
     REQUIRE_USER_ACTIVATION = (

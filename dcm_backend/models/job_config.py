@@ -363,6 +363,15 @@ class JobConfig(CuMetadata):
                     (default None)
     scheduled_exec -- datetime of planned execution
                       (default None)
+    ies -- number of IEs associated with this job configuration
+           (default None)
+    issues -- number of IEs associated with this job configuration that
+              presented an issue/error during processing
+              (default None)
+    issues_latest_exec -- number of IEs from the last execution of this
+                          job configuration that presented an issue/error
+                          during processing
+                          (default None)
 
     Inherits metadata-fields from `CuMetadata`.
     """
@@ -380,6 +389,8 @@ class JobConfig(CuMetadata):
     workspace_id: Optional[str]
     scheduled_exec: Optional[datetime]
     ies: Optional[int]
+    issues: Optional[int]
+    issues_latest_exec: Optional[int]
 
     def __init__(
         self,
@@ -399,6 +410,8 @@ class JobConfig(CuMetadata):
         workspace_id: Optional[str] = None,
         scheduled_exec: Optional[datetime] = None,
         ies: Optional[int] = None,
+        issues: Optional[int] = None,
+        issues_latest_exec: Optional[int] = None,
         **kwargs,
     ) -> None:
         self.template_id = template_id
@@ -414,6 +427,8 @@ class JobConfig(CuMetadata):
         self.workspace_id = workspace_id
         self.scheduled_exec = scheduled_exec
         self.ies = ies
+        self.issues = issues
+        self.issues_latest_exec = issues_latest_exec
         super().__init__(**kwargs)
 
     @DataModel.serialization_handler("template_id", "templateId")
@@ -554,6 +569,24 @@ class JobConfig(CuMetadata):
     @classmethod
     def ies_deserialization_handler(cls, value):
         """Handles `ies`-deserialization."""
+        if value is None:
+            DataModel.skip()
+        return value
+
+    @DataModel.serialization_handler("issues_latest_exec", "issuesLatestExec")
+    @classmethod
+    def issues_latest_exec_serialization_handler(cls, value):
+        """Handles `issues_latest_exec`-serialization."""
+        if value is None:
+            DataModel.skip()
+        return value
+
+    @DataModel.deserialization_handler(
+        "issues_latest_exec", "issuesLatestExec"
+    )
+    @classmethod
+    def issues_latest_exec_deserialization_handler(cls, value):
+        """Handles `issues_latest_exec`-deserialization."""
         if value is None:
             DataModel.skip()
         return value

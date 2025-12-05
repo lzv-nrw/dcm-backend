@@ -489,6 +489,16 @@ post_ie_plan_handler = Object(
 ).assemble()
 
 
+post_job_completion_handler = Object(
+    properties={
+        Property("jobConfigId", "job_config_id"): String(),
+        Property("token", required=True): String(),
+        Property("report", required=True): Object(free_form=True),
+    },
+    accept_only=["jobConfigId", "token", "report"],
+).assemble()
+
+
 def get_user_config_handler(
     require_id: bool,
     accept_creation_md: bool = False,

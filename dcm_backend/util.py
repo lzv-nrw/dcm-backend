@@ -124,12 +124,21 @@ def load_archive_configurations_from_file(
 
 
 uuid_namespace = UUID("96ee5d00-d6fe-4993-9a2d-49670a65f2cf")
-default_admin_password = "".join(
-    [
-        choice(string.ascii_letters + string.digits + """!"§$%&.,+-""")
-        for _ in range(15)
-    ]
-)
+
+
+def _generate_random_password():
+    return "".join(
+        [
+            choice(string.ascii_letters + string.digits + """!"§$%&.,+-""")
+            for _ in range(15)
+        ]
+    )
+
+
+default_admin_password = _generate_random_password()
+default_einstein_password = _generate_random_password()
+default_curie_password = _generate_random_password()
+default_feynman_password = _generate_random_password()
 
 
 class DemoData:
@@ -139,11 +148,11 @@ class DemoData:
     user0 = str(uuid3(uuid_namespace, name="user0"))
     generate_demo_users = True
     user1 = str(uuid3(uuid_namespace, name="user1"))
-    user1_password = None
+    einstein_password = default_einstein_password
     user2 = str(uuid3(uuid_namespace, name="user2"))
-    user2_password = None
+    curie_password = default_curie_password
     user3 = str(uuid3(uuid_namespace, name="user3"))
-    user3_password = None
+    feynman_password = default_feynman_password
     workspace1 = str(uuid3(uuid_namespace, name="workspace1"))
     workspace2 = str(uuid3(uuid_namespace, name="workspace2"))
     template1 = str(uuid3(uuid_namespace, name="template1"))
@@ -170,8 +179,32 @@ class DemoData:
             ("user0", cls.user0),
         ] + (
             [
+                (
+                    "einstein_password",
+                    (
+                        "***"
+                        if cls.einstein_password != default_einstein_password
+                        else cls.einstein_password
+                    ),
+                ),
                 ("user1", cls.user1),
+                (
+                    "curie_password",
+                    (
+                        "***"
+                        if cls.curie_password != default_curie_password
+                        else cls.curie_password
+                    ),
+                ),
                 ("user2", cls.user2),
+                (
+                    "feynman_password",
+                    (
+                        "***"
+                        if cls.feynman_password != default_feynman_password
+                        else cls.feynman_password
+                    ),
+                ),
                 ("user3", cls.user3),
             ]
             if cls.generate_demo_users
@@ -249,7 +282,7 @@ def create_demo_users(db: SQLAdapter, user_create: Callable):
                     user_created=DemoData.user0,
                     datetime_created=now().isoformat(),
                 ),
-                password=DemoData.user1_password,
+                password=DemoData.einstein_password,
             ),
             user_create(
                 config=UserConfig(
@@ -262,7 +295,7 @@ def create_demo_users(db: SQLAdapter, user_create: Callable):
                     user_created=DemoData.user0,
                     datetime_created=now().isoformat(),
                 ),
-                password=DemoData.user2_password,
+                password=DemoData.curie_password,
             ),
             user_create(
                 config=UserConfig(
@@ -275,7 +308,7 @@ def create_demo_users(db: SQLAdapter, user_create: Callable):
                     user_created=DemoData.user0,
                     datetime_created=now().isoformat(),
                 ),
-                password=DemoData.user3_password,
+                password=DemoData.feynman_password,
             ),
         ]
         if DemoData.generate_demo_users

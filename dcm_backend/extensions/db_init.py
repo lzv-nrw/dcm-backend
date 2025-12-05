@@ -63,9 +63,12 @@ def _db_init(config, db, user_create, abort, result, requirements):
                 util.DemoData.admin_password = config.DB_DEMO_ADMIN_PW
 
             # setup demo-users
-            util.DemoData.user1_password = config.DB_DEMO_EINSTEIN_PW
-            util.DemoData.user2_password = config.DB_DEMO_CURIE_PW
-            util.DemoData.user3_password = config.DB_DEMO_FEYNMAN_PW
+            if config.DB_DEMO_EINSTEIN_PW is not None:
+                util.DemoData.einstein_password = config.DB_DEMO_EINSTEIN_PW
+            if config.DB_DEMO_CURIE_PW is not None:
+                util.DemoData.curie_password = config.DB_DEMO_CURIE_PW
+            if config.DB_DEMO_FEYNMAN_PW is not None:
+                util.DemoData.feynman_password = config.DB_DEMO_FEYNMAN_PW
             util.create_demo_users(db, user_create)
 
             # setup demo-data

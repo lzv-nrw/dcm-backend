@@ -33,6 +33,7 @@ class JobInfo(DataModel):
     report: Optional[JSONObject] = None
     template_id: Optional[str] = None
     workspace_id: Optional[str] = None
+    collection: Optional[JSONObject] = None
 
     @DataModel.serialization_handler("job_config_id", "jobConfigId")
     @classmethod

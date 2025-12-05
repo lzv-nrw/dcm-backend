@@ -1,5 +1,22 @@
 # Changelog
 
+## [6.5.0] - 2025-12-05
+
+### Changed
+
+- updated response body of GET-/job/ies and GET-/job/ie to include the 'bagInfoMetadata' for each IE
+- updated default cleanup-locations to include default bundles-directory
+- updated response body of GET-/job/configure to include the number of IES with an issue/error (total and only from the latest execution)
+
+### Added
+
+- added support for batched execution of jobs
+- added an endpoint for completion-callbacks by the Job Processor
+
+### Fixed
+
+- added back support for test-jobs
+
 ## [6.1.1] - 2025-12-01
 
 ### Added
